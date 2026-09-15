@@ -193,6 +193,36 @@ COMPONENT_PATHS: tuple[tuple[str, str, str], ...] = (
 )
 
 
+class _KwargWrapper:
+    """Adapter that gives a module a positional ``forward`` so it can be traced.
+
+    Transformer submodules take keyword-only inputs (``inputs_embeds``, ``image_hidden_states``)
+    and often need ``use_cache=False`` before they will trace at all — a KV cache turns the graph
+    dynamic, which is exactly what an NPU refuses. Wrapping rather than editing the model keeps
+    the exported graph identical to the one that runs in PyTorch.
+    """
+
+    def __new__(cls, module, kwarg: str, extra: dict | None = None):
+        import torch
+
+        class Wrapper(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.inner = module
+                self.kwarg = kwarg
+                self.extra = extra or {}
+
+            def forward(self, tensor):
+                out = self.inner(**{self.kwarg: tensor}, **self.extra)
+                if hasattr(out, "last_hidden_state"):
+                    return out.last_hidden_state
+                if isinstance(out, (tuple, list)):
+                    return out[0]
+                return out
+
+        return Wrapper()
+
+
 def _find_components(policy, image_size: int = 256) -> list[tuple[str, object, tuple | None]]:
     """Locate the sub-modules worth converting, with an example input for each.
 
@@ -213,10 +243,42 @@ def _find_components(policy, image_size: int = 256) -> list[tuple[str, object, t
             continue
         seen.add(id(module))
         example = None
+        wrapped = module
         if kind == "image":
             example = (torch.zeros(1, 3, image_size, image_size),)
-        found.append((name, module, example))
+        elif kind == "vision_hidden":
+            # The connector consumes the vision tower's output; derive its shape by running the
+            # tower once rather than hard-coding a patch count that changes with image size.
+            hidden = _vision_output_shape(model, image_size)
+            if hidden is None:
+                continue
+            example = (torch.zeros(*hidden),)
+            wrapped = _KwargWrapper(module, "image_hidden_states")
+        elif kind == "sequence":
+            hidden_size = getattr(getattr(module, "config", None), "hidden_size", None)
+            if hidden_size is None:
+                continue
+            example = (torch.zeros(1, 48, hidden_size),)
+            wrapped = _KwargWrapper(module, "inputs_embeds", {"use_cache": False})
+        found.append((name, wrapped, example))
     return found
+
+
+def _vision_output_shape(model, image_size: int):
+    """Run the vision tower once to learn what the connector will receive."""
+    import torch
+
+    tower = _getattr_path(model, "vlm_with_expert.vlm.model.vision_model")
+    if tower is None:
+        return None
+    try:
+        tower = tower.to("cpu").to(torch.float32).eval()
+        with torch.inference_mode():
+            out = tower(torch.zeros(1, 3, image_size, image_size))
+        hidden = out.last_hidden_state if hasattr(out, "last_hidden_state") else out
+        return tuple(hidden.shape)
+    except Exception:  # noqa: BLE001 - if it will not run, the connector cannot be exported either
+        return None
 
 
 def _getattr_path(root, path: str):

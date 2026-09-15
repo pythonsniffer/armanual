@@ -22,11 +22,18 @@ inference, which is exactly where the submission needs it.
 A VLA is three networks in a trenchcoat. SmolVLA is a SigLIP vision tower, a SmolLM2 language
 model and a flow-matching action expert. They do not convert equally:
 
-| Component | Converts to IR? | Why |
-| --- | --- | --- |
-| Vision tower | yes | Static shapes, pure feed-forward — the ideal OpenVINO workload |
-| Action expert | yes | Small, static, and the part that runs every inference |
-| Language model | problematic | KV cache and dynamic sequence length; the NPU rejects dynamic shapes outright |
+Measured, not predicted — `scripts/benchmark_intel.py --export` on `lerobot/smolvla_base`:
+
+| Component | Params | Converts to IR? | Size (fp16) | Notes |
+| --- | --- | --- | --- | --- |
+| Vision tower (SmolVLMVisionTransformer) | 86.4 M | **yes** | 173.4 MB | Static shapes, pure feed-forward — the ideal OpenVINO workload |
+| Vision connector (SmolVLMConnector) | 11.8 M | **yes** | 23.6 MB | Also static once given the tower's output shape |
+| Action expert (LlamaModel) | 98.2 M | **no** | — | `torch.jit.trace` fails (`unordered_map::at`) even with `use_cache=False` and eager attention |
+| Language model (LlamaModel) | 204.6 M | not attempted | — | KV cache and dynamic sequence length; the NPU rejects dynamic shapes outright |
+
+So the deployable split today is: **vision tower and connector on the Intel device, the rest on
+PyTorch**. That is not a disappointing result — the vision tower runs *once per camera* and the
+policy uses three, so it is the largest single term in the inference budget.
 
 So `armanual/policy/openvino_export.py` converts **each component separately** and records the
 outcome of each, and `OpenVINOBackend` runs the converted ones on the Intel device while leaving

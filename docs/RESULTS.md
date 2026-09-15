@@ -120,6 +120,12 @@ python scripts/benchmark_intel.py --checkpoint <ckpt> --export --precisions fp16
 | --- | --- | --- | --- | --- | --- | --- |
 | SmolVLA vision tower (86.4 M params) | fp16 | 173.4 MB | 0.5 s | 170 ms | **60.3 ms** | 16.6 Hz |
 | SmolVLA vision tower | INT8 (NNCF) | **87.9 MB** | 0.5 s | — | **35.2 ms** | 28.4 Hz |
+| SmolVLA vision connector (11.8 M) | fp16 | 23.6 MB | — | — | **0.95 ms** | ~1050 Hz |
+| SmolVLA action expert (98.2 M) | — | did not convert | — | — | — | — |
+
+The action expert is a Llama stack and `torch.jit.trace` fails on it (`unordered_map::at`), with
+`use_cache=False` and eager attention both tried. It stays on PyTorch, and that is reported rather
+than worked around — see [INTEL.md](INTEL.md) for the full component table.
 
 INT8 gives **1.97× smaller and 1.71× faster** on the same graph, calibrated on frames rendered
 from the robot's own three cameras rather than a generic image corpus.

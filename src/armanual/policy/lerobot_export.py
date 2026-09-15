@@ -59,12 +59,26 @@ def build_features(image_size: tuple[int, int] = IMAGE_SIZE, use_videos: bool = 
     return features
 
 
+def open_dataset(repo_id: str, root: Path):
+    """Reopen an existing dataset so more episodes can be appended to it.
+
+    Collection is naturally incremental — a skill that produced no usable demonstrations on the
+    first pass gets another, easier pass — and rebuilding the whole dataset each time would throw
+    away an hour of simulation for no reason.
+    """
+    from lerobot.datasets.lerobot_dataset import LeRobotDataset
+
+    return LeRobotDataset(repo_id, root=Path(root))
+
+
 def create_dataset(repo_id: str, root: Path, *, image_size: tuple[int, int] = IMAGE_SIZE,
-                   use_videos: bool = True, overwrite: bool = False):
-    """Create (or recreate) an empty LeRobotDataset ready to receive frames."""
+                   use_videos: bool = True, overwrite: bool = False, append: bool = False):
+    """Create (or recreate, or reopen) a LeRobotDataset ready to receive frames."""
     from lerobot.datasets.lerobot_dataset import LeRobotDataset
 
     root = Path(root)
+    if append and (root / "meta" / "info.json").exists():
+        return open_dataset(repo_id, root)
     if overwrite and root.exists():
         shutil.rmtree(root)
     return LeRobotDataset.create(

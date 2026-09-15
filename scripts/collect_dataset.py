@@ -72,6 +72,12 @@ def main() -> None:
                         help="vary sizes, mass, friction and distractors (default on)")
     parser.add_argument("--no-videos", action="store_true", help="store raw images instead of video")
     parser.add_argument("--overwrite", action="store_true")
+    parser.add_argument("--append", action="store_true",
+                        help="add episodes to an existing dataset instead of recreating it")
+    parser.add_argument("--skills", nargs="*", default=None,
+                        help="only collect these skills (e.g. pour open_drawer)")
+    parser.add_argument("--easy", action="store_true",
+                        help="placement-only randomization: higher expert success, less variety")
     parser.add_argument("--keep-failures", action="store_true",
                         help="record unsuccessful episodes too (off by default)")
     parser.add_argument("--dry-run", action="store_true",
@@ -82,6 +88,8 @@ def main() -> None:
 
     rng = random.Random(args.start_seed)
     plan = instruction_plan(args.episodes_per_skill, rng)
+    if args.skills:
+        plan = [entry for entry in plan if entry[1] in set(args.skills)]
     # Which axes vary during *collection* is a data-quality decision, not a robustness one.
     # Measured on eight pilot episodes: with lighting, friction and clutter randomized the
     # analytical expert succeeds about 25% of the time, so 300 episodes yield ~75 usable
@@ -89,10 +97,11 @@ def main() -> None:
     # The policy is trained on the cleaner distribution and *evaluated* under full randomization,
     # which is where generalization belongs.
     config = (
-        RandomizationConfig(placement=True, sizes=True, mass=True, friction=False,
-                            colors=False, lighting=False, background=False, distractors=False)
-        if args.randomize
-        else RandomizationConfig.placement_only()
+        RandomizationConfig.placement_only()
+        if args.easy or not args.randomize
+        else RandomizationConfig(placement=True, sizes=True, mass=True, friction=False,
+                                 colors=False, lighting=False, background=False,
+                                 distractors=False)
     )
 
     dataset = None
@@ -101,7 +110,7 @@ def main() -> None:
         from armanual.policy.lerobot_export import append_episode, create_dataset
 
         dataset = create_dataset(args.repo_id, args.root, use_videos=not args.no_videos,
-                                 overwrite=args.overwrite)
+                                 overwrite=args.overwrite, append=args.append)
 
     jobs = [
         {
