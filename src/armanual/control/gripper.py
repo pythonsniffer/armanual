@@ -19,8 +19,12 @@ import numpy as np
 
 #: Fixed jaw tip position in the TCP frame (metres).
 FIXED_JAW = np.array([0.0029, 0.0002, -0.0201])
-#: Moving jaw tip z in the TCP frame: ``A + B * opening`` (metres).
+#: Moving jaw tip z in the TCP frame: ``A + B * opening`` (metres). Accurate to ~1 mm for
+#: commands up to about 0.45 (aperture ~68 mm); beyond that the jaw's arc bends away from the
+#: line and the fit over-predicts. Every grasp in this project stays inside the accurate range —
+#: see the measured table in docs/WORKSPACE.md.
 MOVING_JAW_Z0, MOVING_JAW_SLOPE = -0.0172, 0.1478
+MODEL_VALID_TO = 0.45
 #: Clearance left on each side of an object when choosing a pre-grasp aperture.
 DEFAULT_CLEARANCE = 0.006
 #: Command range accepted by :meth:`armanual.sim.world.World.set_gripper`.
