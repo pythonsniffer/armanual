@@ -34,7 +34,11 @@ COLORS: dict[str, tuple[float, float, float]] = {
     "navy": (0.12, 0.20, 0.52),
     "red": (0.82, 0.21, 0.18),
     "green": (0.18, 0.60, 0.35),
-    "yellow": (0.92, 0.78, 0.20),
+    # Deliberately no yellow: the SO-101 model is yellow, and a yellow cup would be
+    # indistinguishable from an arm for the colour-based detector. Ambiguity in this project
+    # comes from *similar tableware* (two blues, two plates), not from a sensor artefact.
+    "purple": (0.55, 0.30, 0.75),
+    "orange": (0.92, 0.50, 0.13),
     "black": (0.12, 0.12, 0.14),
     "silver": (0.78, 0.79, 0.82),
     "brown": (0.48, 0.32, 0.20),
@@ -129,7 +133,7 @@ _DISTRACTORS: tuple[dict, ...] = (
     dict(name="cup_extra", category="cup", pos=(0.33, -0.08, 0.0),
          size=(0.024, 0.024, 0.028), color="red", mass=0.045, size_label="small"),
     dict(name="napkin_1", category="napkin", pos=(-0.11, -0.21, 0.003),
-         size=(0.040, 0.030, 0.002), color="yellow", mass=0.012, size_label="medium"),
+         size=(0.040, 0.030, 0.002), color="purple", mass=0.012, size_label="medium"),
     dict(name="plate_extra", category="plate", pos=(0.04, -0.22, 0.006),
          size=(0.042, 0.042, 0.004), color="white", mass=0.060, size_label="medium"),
 )
@@ -251,7 +255,7 @@ def _make_object(
     if cfg.colors and entry["category"] in ("cup", "plate", "napkin"):
         # Re-colour only tableware, and only within a palette that keeps the
         # instruction checkable (a "blue cup" may become navy — deliberately confusable).
-        palette = ["blue", "navy", "red", "green", "yellow", "white"]
+        palette = ["blue", "navy", "red", "green", "purple", "white"]
         color_name = str(rng.choice(palette))
     rgb = COLORS[color_name]
 
