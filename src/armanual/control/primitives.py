@@ -20,6 +20,11 @@ from armanual.control.kinematics import solve_reach
 
 UP = np.array([0.0, 0.0, 1.0])
 
+#: How far from the tool centre point the poured stream lands, along the arm's radial direction,
+#: when the wrist is flexed by ~1.2 rad. Measured in simulation (scripts/measure_pour.py), not
+#: derived: the bottle is held by its body, so the mouth swings well clear of the wrist.
+SPILL_REACH = 0.108
+
 
 def _smoothstep(alpha: float) -> float:
     """Ease-in/ease-out. Position actuators track a smooth ramp far better than a step."""
@@ -526,33 +531,39 @@ def handoff_take(world, receiver: str, meeting, width: float, sync: "Rendezvous"
                                 label="handoff-clear")
 
 
-def pour_over(world, arm: str, cup_xyz, *, tilt_angle: float = 2.0, hold_seconds: float = 1.8,
-              height: float = 0.155, dt: float = 0.05) -> Skill:
-    """Pour the held bottle over a cup at ``cup_xyz`` by rolling the wrist.
+def pour_over(world, arm: str, cup_xyz, *, tilt_angle: float = 1.2, hold_seconds: float = 2.0,
+              height: float = 0.165, dt: float = 0.05) -> Skill:
+    """Pour the held bottle into a cup by tipping the wrist over it.
 
-    The spout is offset to the near side of the cup before tilting, so the bottle's mouth ends up
-    over the opening rather than over the rim. Liquid is modelled as particles (see
-    :mod:`armanual.sim.builder`), so a pour that misses is visibly a miss.
+    Two things here are measured rather than assumed, because the obvious version pours onto the
+    table:
+
+    * **Which joint tips the bottle.** The gripper holds the bottle from above, so its *roll* axis
+      is vertical and rolling merely spins the bottle in place. It is ``wrist_flex`` that swings
+      the bottle's mouth over, so that is the joint this drives.
+    * **Where the liquid lands.** With the wrist flexed by ~1.2 rad the stream leaves the bottle
+      about 11 cm from the tool centre point, along the arm's own radial direction. So the arm
+      stands *back* from the cup by that much before tipping, instead of hovering over it.
     """
     handle = world.arms[arm]
     cup = np.asarray(cup_xyz, dtype=float)
-    above = np.array([cup[0], cup[1], height])
-    radial = above[:2] - world.base_pos(arm)[:2]
+    radial = cup[:2] - world.base_pos(arm)[:2]
     radial = radial / (np.linalg.norm(radial) + 1e-9)
-    spout = np.array([above[0] - radial[0] * 0.030, above[1] - radial[1] * 0.030, above[2]])
+    stand_off = SPILL_REACH * float(np.sin(min(tilt_angle, 1.4)) / np.sin(1.2))
+    station = np.array([cup[0] - radial[0] * stand_off, cup[1] - radial[1] * stand_off, height])
 
-    yield from goto_pose(world, arm, spout, duration=1.6, dt=dt, tolerance=0.035,
-                         label="pour-above")
-    roll = handle.actuator_ids[4]
-    start = float(world.data.ctrl[roll])
-    target = start + tilt_angle
-    ticks = max(1, int(round(1.2 / dt)))
+    yield from goto_pose(world, arm, station, duration=1.6, dt=dt, tolerance=0.04,
+                         label="pour-station")
+    flex = handle.actuator_ids[3]
+    start = float(world.data.ctrl[flex])
+    target = start - tilt_angle
+    ticks = max(1, int(round(1.4 / dt)))
     for i in range(1, ticks + 1):
-        world.data.ctrl[roll] = start + (target - start) * _smoothstep(i / ticks)
+        world.data.ctrl[flex] = start + (target - start) * _smoothstep(i / ticks)
         yield
     yield from wait(hold_seconds, dt=dt)
     for i in range(1, ticks + 1):
-        world.data.ctrl[roll] = target + (start - target) * _smoothstep(i / ticks)
+        world.data.ctrl[flex] = target + (start - target) * _smoothstep(i / ticks)
         yield
 
 

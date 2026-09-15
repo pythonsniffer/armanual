@@ -102,25 +102,23 @@ def _object_xml(obj: ObjectSpec, scale_friction: float) -> str:
                 f'quat="{_q(a + math.pi / 2)}" mass="{obj.mass * 0.55 / n_wall:.5f}" {common}/>'
             )
         if obj.category == "bottle":
-            # A narrowed neck above the body. Gripping a 24 mm neck is far more reliable than
-            # spanning the 48 mm body (measured in scripts/grasp_sweep.py), and it puts the
-            # spout where a pour needs it.
-            neck_r = sx * 0.5
-            neck_z = 2 * wall_h + 0.004
-            for i in range(6):
-                a = 2 * math.pi * i / 6
+            # A short collar, not a narrow neck. An earlier version tapered the top to a 24 mm
+            # neck to grasp it there; that grasp turned out to be far less reliable than gripping
+            # the body (0/4 vs 3/4 across seeds), and the narrow opening also trapped the liquid
+            # particles when the bottle was tipped — the pour looked correct and delivered
+            # nothing. A wide mouth pours.
+            collar_r = sx * 0.88
+            collar_z = 2 * wall_h + 0.004
+            for i in range(10):
+                a = 2 * math.pi * i / 10
                 parts.append(
                     f'<geom name="g_{obj.name}_n{i}" type="box" '
-                    f'size="{neck_r * math.tan(math.pi / 6):.4f} 0.003 0.016" '
-                    f'pos="{neck_r * math.cos(a):.4f} {neck_r * math.sin(a):.4f} '
-                    f'{neck_z + 0.016:.4f}" quat="{_q(a + math.pi / 2)}" mass="0.004" {common}/>'
+                    f'size="{collar_r * math.tan(math.pi / 10):.4f} 0.003 0.010" '
+                    f'pos="{collar_r * math.cos(a):.4f} {collar_r * math.sin(a):.4f} '
+                    f'{collar_z + 0.010:.4f}" quat="{_q(a + math.pi / 2)}" mass="0.003" {common}/>'
                 )
             parts.append(
-                f'<site name="neck_{obj.name}" pos="0 0 {neck_z + 0.020:.4f}" size="0.004" '
-                f'rgba="0 0 0 0"/>'
-            )
-            parts.append(
-                f'<site name="spout_{obj.name}" pos="0 0 {neck_z + 0.034:.4f}" size="0.004" '
+                f'<site name="spout_{obj.name}" pos="0 0 {collar_z + 0.022:.4f}" size="0.004" '
                 f'rgba="0 0 0 0"/>'
             )
         # Interior reference point: used to score "water landed in the cup".

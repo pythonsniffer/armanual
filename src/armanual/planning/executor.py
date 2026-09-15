@@ -213,7 +213,10 @@ class ClosedLoopExecutor:
 
     def _run_pour(self, step: Step, observation: SceneObservation) -> object:
         """Pick up the bottle, optionally have the other arm steady the cup, then pour."""
-        bottles = [d for d in observation.detections if d.category == "bottle"]
+        bottles = sorted(
+            (d for d in observation.detections if d.category == "bottle"),
+            key=lambda d: (-d.confidence, -d.pixel_area),
+        )
         if not bottles:
             from armanual.control.executor import RunResult
 

@@ -380,7 +380,10 @@ class Planner:
 
     def _plan_pour(self, action, observation, plan: Plan) -> list[Step]:
         """Pouring needs the bottle in one arm and, ideally, the cup steadied by the other."""
-        bottles = [d for d in observation.detections if d.category == "bottle"]
+        bottles = sorted(
+            (d for d in observation.detections if d.category == "bottle"),
+            key=lambda d: (-d.confidence, -d.pixel_area),
+        )
         if not bottles:
             plan.notes.append("pour requested but no bottle detected")
             return []

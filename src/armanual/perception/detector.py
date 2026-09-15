@@ -67,6 +67,10 @@ class Detection:
     #: Direction of the footprint's major axis, radians in the table plane. Meaningful for
     #: elongated objects (a utensil must be grasped *across* its handle, not along it).
     orientation: float = 0.0
+    #: Radius of just the top slice of the object. For a bottle this is the *neck*, which is what
+    #: the gripper actually closes on — the full footprint would be the body and would put the
+    #: pinch point off the object entirely.
+    top_radius: float = 0.0
     confidence: float = 1.0
     track_id: int | None = None
     #: Name assigned by association with an expected object list, when one is supplied.
@@ -229,6 +233,12 @@ class TabletopDetector:
             else:
                 major = minor = 0.01
             radius = float(np.percentile(np.linalg.norm(centered, axis=1), 92))
+            top_slice = blob_points[blob_points[:, 2] > top_z - 0.022]
+            top_radius = (
+                float(np.percentile(np.linalg.norm(top_slice[:, :2] - centroid_xy, axis=1), 85))
+                if len(top_slice) >= 5
+                else radius
+            )
             elongation = major / max(minor, 1e-6)
             mean_rgb = np.median(blob_rgb, axis=0)
             color_name, color_conf = _nearest_color(mean_rgb)
@@ -242,6 +252,7 @@ class TabletopDetector:
                 Detection(
                     position=np.array([centroid_xy[0], centroid_xy[1], top_z]),
                     radius=radius,
+                    top_radius=top_radius,
                     height=top_z,
                     color_name=color_name,
                     color_rgb=mean_rgb,

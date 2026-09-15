@@ -136,6 +136,11 @@ class CameraObserver:
                 continue
             if candidate.radius > 0.09:  # implausibly wide: a merged blob, not a table object
                 continue
+            if candidate.height > 0.09:
+                # A secondary view exists to recover *flat* objects an arm hides from above.
+                # Anything tall is already well seen from overhead, and a tall blob in a shallow
+                # view is usually the other arm — accepting it invents bottles that are not there.
+                continue
             near = min(
                 (float(np.linalg.norm(c.position[:2] - candidate.position[:2])) for c in merged),
                 default=1e9,

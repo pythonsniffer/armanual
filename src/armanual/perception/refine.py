@@ -115,7 +115,7 @@ class WristRefiner:
 #: wrist-camera re-centring. A rim or handle grasp deliberately aims off-centre, so re-centring it
 #: on the object would move the jaws away from the feature they are supposed to close on — which
 #: is why refinement is opt-in per grasp type rather than applied to everything.
-CENTROID_GRASPS = ("utensil-handle", "cup-span", "bottle-neck")
+CENTROID_GRASPS = ("utensil-handle", "cup-span", "bottle-body")
 
 
 def refine_grasp(refiner: WristRefiner, arm: str, grasp, *, keep_height: bool = False):

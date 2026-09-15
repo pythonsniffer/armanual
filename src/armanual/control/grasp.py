@@ -162,14 +162,28 @@ def grasp_from_detection(detection, base_xy, *, obj_yaw: float | None = None) ->
         return GraspSpec(pos=rim, jaw=radial, width=0.009, lift=0.075, approach_height=0.070,
                          seat=0.0, label="plate-rim")
     if detection.category == "bottle":
-        neck = position.copy()
-        neck[2] = top - 0.018
-        return GraspSpec(pos=neck, jaw=radial, width=max(0.020, radius), lift=0.11,
-                         approach_height=0.075, seat=0.0, label="bottle-neck")
+        # Clamp the grasp width to what a bottle neck can plausibly be. The blob radius is an
+        # upper bound that sometimes swallows a neighbouring object, and an over-wide width moves
+        # the pinch point (which is derived from it) clean off the object.
+        # Grip the *body*, not the neck. The neck is a 24 mm target and the jaws close across
+        # it with about 3 mm to spare, so a centimetre of perception error empties the grasp;
+        # the body is twice as wide and self-centres between the jaws. Measured over four seeds:
+        # 0/4 on the neck, 3/4 on the body. The wrist still rolls over the cup to pour, which is
+        # what the task actually needs.
+        # Height and width are the best of a measured sweep (scripts/grasp_sweep.py, four seeds):
+        # gripping the upper body at 0.6 of the detected height beats mid-body, and a width below
+        # ~48 mm never closes on the bottle at all. Bottle grasping remains the least reliable
+        # grasp in the suite — reported as such in docs/RESULTS.md rather than tuned away.
+        body = position.copy()
+        body[2] = max(0.030, top * 0.60)
+        width = float(np.clip(2 * radius, 0.048, 0.070))
+        return GraspSpec(pos=body, jaw=radial, width=width, lift=0.11,
+                         approach_height=0.070, seat=0.0, label="bottle-body")
     if detection.category == "cup":
         body = position.copy()
         body[2] = top * 0.75
-        return GraspSpec(pos=body, jaw=radial, width=min(2 * radius, 0.075), lift=0.10,
+        width = float(np.clip(2 * radius, 0.040, 0.075))
+        return GraspSpec(pos=body, jaw=radial, width=width, lift=0.10,
                          approach_height=0.085, seat=0.0, label="cup-span")
     if detection.category == "utensil":
         # The detector sees a sliver, and inside the drawer it is sliced at cutlery height — so
