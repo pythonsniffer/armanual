@@ -183,6 +183,7 @@ def run_episode(task: TaskDefinition, seed: int, *, privileged: bool = False,
         if capture is not None:
             runner.on_frame.append(capture)
         subgoal_episode = runner.run(text, style=task.style, seed=seed)
+        runner.close()
         record_dict = subgoal_episode.to_dict()
         record_dict["subtask_success_rate"] = subgoal_episode.success_rate
         record_dict["steps_attempted"] = len(subgoal_episode.results)

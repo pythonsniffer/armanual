@@ -161,6 +161,7 @@ class SubgoalRunner:
         self.dt = dt
         self.grounder = Grounder()
         self.on_frame = []
+        self._executor: ClosedLoopExecutor | None = None
 
     @property
     def mode(self) -> str:
@@ -209,7 +210,16 @@ class SubgoalRunner:
         return episode
 
     def _run_scripted(self, sentence: str) -> tuple[bool, str]:
-        executor = ClosedLoopExecutor(self.world, self.observer, max_steps=4, dt=self.dt)
-        executor.on_frame.extend(self.on_frame)
-        executor.run(sentence)
+        # One executor for the whole episode. Each one owns a wrist-camera refiner with its own GL
+        # renderers, so building a fresh executor per subgoal leaks contexts across a ten-seed
+        # sweep and eventually exhausts them.
+        if self._executor is None:
+            self._executor = ClosedLoopExecutor(self.world, self.observer, max_steps=4, dt=self.dt)
+            self._executor.on_frame.extend(self.on_frame)
+        self._executor.run(sentence)
         return verify_subgoal(self.world, self.observer, sentence)
+
+    def close(self) -> None:
+        if self._executor is not None:
+            self._executor.refiner.close()
+            self._executor = None

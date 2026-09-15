@@ -111,6 +111,7 @@ def main() -> None:
         args.json.write_text(json.dumps(episode.to_dict(), indent=2))
         print(f"record: {args.json}")
 
+    runner.close()
     observer.close()
     world.close()
 
