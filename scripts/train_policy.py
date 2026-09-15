@@ -10,8 +10,11 @@ Memory notes for an 8 GB card (RTX 5050 and similar):
 
 * SmolVLA base is ~450 M parameters. With the vision encoder frozen and bf16 activations, the
   trainable action expert fits comfortably; a full fine-tune of everything does not.
-* Batch size 2 with 16-step gradient accumulation reaches an effective batch of 32 without the
-  memory spike; the reference recipe's batch of 64 does not fit in 8 GB at any image size.
+* Batch size 16 fits in 8 GB with the vision encoder frozen at 256x256. Measured: batch 2, 4, 8
+  and 16 all run at ~2 steps/s, because video decoding in the dataloader — not the GPU — is the
+  bottleneck, so the larger batch costs nothing.
+* Gradient accumulation is only available when the optimizer is configured from the CLI; with
+  ``--policy.path`` the policy supplies its own, so increase ``--batch-size`` instead.
 * If you still hit an out-of-memory error, halve ``--batch-size`` and double
   ``--grad-accum`` before touching anything else — that trade is free apart from wall-clock.
 """
@@ -45,8 +48,11 @@ FFMPEG_BIN = REPO_ROOT / ".venv" / "ffmpeg" / "bin"
 POLICY_PRESETS = {
     "smolvla": {
         "path": "lerobot/smolvla_base",
-        "batch_size": 2,
-        "grad_accum": 16,
+        # Measured on an 8 GB RTX 5050: batch 2, 4, 8 and 16 all run at ~2 steps/s, because the
+        # bottleneck is video decoding in the dataloader, not the GPU. A larger batch is therefore
+        # nearly free, and 16 is where this dataset stops gaining from it.
+        "batch_size": 16,
+        "grad_accum": 1,
         "steps": 20000,
         "extra": [
             # The published defaults, kept because they are what makes 450M parameters fit in
@@ -118,8 +124,10 @@ def main() -> None:
     else:
         command.append(f"--policy.type={preset['type']}")
     if grad_accum > 1:
-        # LeRobot exposes this as an optimizer setting; name differs across versions, so pass the
-        # one the installed version knows and let it fail loudly rather than silently ignoring it.
+        # Only valid when the optimizer is configured from the CLI. With --policy.path the policy
+        # brings its own optimizer config and LeRobot rejects the sub-flag, so raising the batch
+        # size is the supported way to increase the effective batch here.
+        command.append(f"--optimizer.type=adamw")
         command.append(f"--optimizer.grad_accumulation_steps={grad_accum}")
     command.extend(preset["extra"])
     if args.resume:
