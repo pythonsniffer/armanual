@@ -10,8 +10,8 @@ Memory notes for an 8 GB card (RTX 5050 and similar):
 
 * SmolVLA base is ~450 M parameters. With the vision encoder frozen and bf16 activations, the
   trainable action expert fits comfortably; a full fine-tune of everything does not.
-* Batch size 4 with gradient accumulation reaches the same effective batch as the reference
-  recipe's 64 without the memory spike.
+* Batch size 2 with 16-step gradient accumulation reaches an effective batch of 32 without the
+  memory spike; the reference recipe's batch of 64 does not fit in 8 GB at any image size.
 * If you still hit an out-of-memory error, halve ``--batch-size`` and double
   ``--grad-accum`` before touching anything else — that trade is free apart from wall-clock.
 """
@@ -19,6 +19,7 @@ Memory notes for an 8 GB card (RTX 5050 and similar):
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import subprocess
 import sys
@@ -26,15 +27,36 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
+#: SmolVLA's pretrained config names its cameras camera1..camera3; our dataset names them by
+#: where they are mounted. LeRobot maps them with an explicit rename rather than by position,
+#: which also documents which physical camera the policy treats as primary.
+RENAME_MAP = {
+    "observation.images.top": "observation.images.camera1",
+    "observation.images.left_wrist": "observation.images.camera2",
+    "observation.images.right_wrist": "observation.images.camera3",
+}
+
+#: torchcodec decodes the dataset's videos and needs real FFmpeg shared libraries. This repo
+#: installs them into .venv/ffmpeg via conda (no root required); PyAV's bundled copies have
+#: mangled sonames and do not satisfy it.
+FFMPEG_LIB = REPO_ROOT / ".venv" / "ffmpeg" / "lib"
+FFMPEG_BIN = REPO_ROOT / ".venv" / "ffmpeg" / "bin"
+
 POLICY_PRESETS = {
     "smolvla": {
         "path": "lerobot/smolvla_base",
-        "batch_size": 4,
+        "batch_size": 2,
         "grad_accum": 16,
         "steps": 20000,
         "extra": [
+            # The published defaults, kept because they are what makes 450M parameters fit in
+            # 8 GB: the SigLIP tower stays frozen and only the action expert trains.
             "--policy.freeze_vision_encoder=true",
             "--policy.train_expert_only=true",
+            # Our cameras record at 224x224, so padding up to the pretrained 512x512 adds no
+            # information and costs ~4x the vision compute per sample. 256 keeps the patch grid
+            # meaningful and roughly quadruples training throughput on a laptop GPU.
+            "--policy.resize_imgs_with_padding=[256,256]",
             "--policy.push_to_hub=false",
         ],
     },
@@ -63,6 +85,9 @@ def main() -> None:
     parser.add_argument("--job-name", default=None)
     parser.add_argument("--wandb", action="store_true")
     parser.add_argument("--resume", action="store_true")
+    parser.add_argument("--num-workers", type=int, default=2, dest="num_workers",
+                        help="dataloader workers; each one decodes video, so keep it modest on a "
+                             "memory-constrained machine")
     parser.add_argument("--print-only", action="store_true", help="show the command and exit")
     args = parser.parse_args()
 
@@ -85,6 +110,8 @@ def main() -> None:
         f"--wandb.enable={'true' if args.wandb else 'false'}",
         "--save_freq=2000",
         "--log_freq=100",
+        f"--rename_map={json.dumps(RENAME_MAP)}",
+        f"--num_workers={args.num_workers}",
     ]
     if preset.get("path"):
         command.append(f"--policy.path={preset['path']}")
@@ -108,6 +135,15 @@ def main() -> None:
     # Fragmentation is the usual cause of a late OOM on a small card; this keeps the allocator
     # from holding on to unusable blocks.
     env.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
+    if FFMPEG_LIB.exists():
+        env["LD_LIBRARY_PATH"] = f"{FFMPEG_LIB}:{env.get('LD_LIBRARY_PATH', '')}".rstrip(":")
+        env["PATH"] = f"{FFMPEG_BIN}:{env.get('PATH', '')}"
+    else:
+        print(
+            f"warning: {FFMPEG_LIB} not found. torchcodec needs FFmpeg shared libraries to read "
+            "the dataset's videos. Install them with:\n"
+            "  conda create -y -p .venv/ffmpeg -c conda-forge 'ffmpeg=7.*'"
+        )
     raise SystemExit(subprocess.call(command, env=env))
 
 
