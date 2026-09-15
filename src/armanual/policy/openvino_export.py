@@ -93,7 +93,13 @@ def convert_module(module, example_inputs: tuple, out_path: Path, *, name: str,
 
     parameters = sum(p.numel() for p in module.parameters())
     try:
-        module = module.eval()
+        # Convert from CPU float32 regardless of how the checkpoint was loaded. Tracing a module
+        # whose weights are CUDA bfloat16 against CPU float32 example inputs fails with a dtype
+        # mismatch that reads like an OpenVINO problem but is not one.
+        module = module.to("cpu").to(torch.float32).eval()
+        example_inputs = tuple(
+            a.to("cpu").to(torch.float32) if hasattr(a, "to") else a for a in example_inputs
+        )
         with torch.inference_mode():
             model = ov.convert_model(module, example_input=example_inputs)
     except Exception as exc:  # noqa: BLE001 - a conversion failure is a reportable result
@@ -116,6 +122,11 @@ def convert_module(module, example_inputs: tuple, out_path: Path, *, name: str,
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     ov.save_model(model, out_path, compress_to_fp16=precision in ("fp16", "int8"))
+    # Record the shapes the model was traced with. The benchmark needs them to build valid inputs,
+    # and the NPU needs static shapes outright — guessing 1 for a dynamic dimension produces an
+    # image of 1x1 pixels and a confusing failure deep inside the plugin.
+    shapes = [list(a.shape) for a in example_inputs if hasattr(a, "shape")]
+    out_path.with_suffix(".shapes.json").write_text(json.dumps({"inputs": shapes}, indent=2))
     return ComponentReport(
         name=name,
         converted=True,
@@ -169,25 +180,42 @@ def export_policy(policy, out_dir: Path, *, precision: str = "fp16",
     return report
 
 
-def _find_components(policy) -> list[tuple[str, object, tuple | None]]:
-    """Locate the sub-modules worth converting, without hard-coding one policy's layout."""
+#: Where the convertible pieces live inside the policies we deploy. Verified by inspecting the
+#: loaded model rather than guessed: SmolVLA is a SmolVLM2 (vision transformer + connector +
+#: Llama text model) alongside a separate Llama action expert.
+COMPONENT_PATHS: tuple[tuple[str, str, str], ...] = (
+    ("vision_tower", "vlm_with_expert.vlm.model.vision_model", "image"),
+    ("vision_connector", "vlm_with_expert.vlm.model.connector", "vision_hidden"),
+    ("action_expert", "vlm_with_expert.lm_expert", "sequence"),
+    # Generic fallbacks for other LeRobot policies (ACT and friends).
+    ("backbone", "backbone", "image"),
+    ("action_head", "action_head", "sequence"),
+)
+
+
+def _find_components(policy, image_size: int = 256) -> list[tuple[str, object, tuple | None]]:
+    """Locate the sub-modules worth converting, with an example input for each.
+
+    Conversion is attempted per component because a VLA is not one graph: the vision transformer
+    and the connector are static feed-forward stacks that convert cleanly, while a Llama with a KV
+    cache brings dynamic shapes that the NPU rejects outright. Reporting that per component is
+    more useful than one failed whole-model conversion.
+    """
     import torch
 
     found: list[tuple[str, object, tuple | None]] = []
     model = getattr(policy, "model", policy)
+    seen: set[int] = set()
 
-    for attribute in ("vision_tower", "vision_encoder", "image_encoder", "backbone"):
-        module = _getattr_path(model, attribute)
-        if module is not None:
-            found.append((f"vision_{attribute}", module, (torch.zeros(1, 3, 224, 224),)))
-            break
-
-    for attribute in ("action_expert", "action_head", "expert", "head"):
-        module = _getattr_path(model, attribute)
-        if module is not None:
-            found.append((f"expert_{attribute}", module, None))
-            break
-
+    for name, path, kind in COMPONENT_PATHS:
+        module = _getattr_path(model, path)
+        if module is None or id(module) in seen:
+            continue
+        seen.add(id(module))
+        example = None
+        if kind == "image":
+            example = (torch.zeros(1, 3, image_size, image_size),)
+        found.append((name, module, example))
     return found
 
 

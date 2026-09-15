@@ -94,10 +94,7 @@ def benchmark_ir(ir_path: Path, device: str, *, precision: str = "fp16", iterati
         compiled = core.compile_model(model, device)
         run.compile_seconds = round(time.perf_counter() - started, 2)
 
-        inputs = {}
-        for port in compiled.inputs:
-            shape = [int(d.get_length()) if d.is_static else 1 for d in port.partial_shape]
-            inputs[port.any_name] = np.random.rand(*shape).astype(np.float32)
+        inputs = _example_inputs(compiled, Path(ir_path))
 
         request = compiled.create_infer_request()
         started = time.perf_counter()
@@ -121,6 +118,34 @@ def benchmark_ir(ir_path: Path, device: str, *, precision: str = "fp16", iterati
     except Exception as exc:  # noqa: BLE001 - a device that cannot run it is a real result
         run.error = f"{type(exc).__name__}: {exc}"
     return run
+
+
+def _example_inputs(compiled, ir_path: Path) -> dict:
+    """Build valid inputs for a compiled model.
+
+    Shapes come from the sidecar the exporter writes. Without it, dynamic dimensions are filled
+    with defaults that at least make geometric sense — 1 for batch, 256 for spatial axes — rather
+    than 1 everywhere, which turns an image tensor into a single pixel and fails inside the
+    plugin with an error that looks like a bug in the device.
+    """
+    recorded = []
+    sidecar = ir_path.with_suffix(".shapes.json")
+    if sidecar.exists():
+        recorded = json.loads(sidecar.read_text()).get("inputs", [])
+
+    inputs = {}
+    for index, port in enumerate(compiled.inputs):
+        if index < len(recorded):
+            shape = [int(d) for d in recorded[index]]
+        else:
+            shape = []
+            for axis, dimension in enumerate(port.partial_shape):
+                if dimension.is_static:
+                    shape.append(int(dimension.get_length()))
+                else:
+                    shape.append(1 if axis == 0 else (256 if axis >= 2 else 3))
+        inputs[port.any_name] = np.random.rand(*shape).astype(np.float32)
+    return inputs
 
 
 def benchmark_torch(callable_fn, *, iterations: int = 100, warmup: int = 10,
