@@ -85,6 +85,10 @@ Checklist:
 | Demonstration dataset | `pythonsniffer/armanual-dinner-table` |
 | Fine-tuned policy | `pythonsniffer/armanual-smolvla` |
 
+The deployed system is **pure VLA**: `scripts/run_task.py --policy <ckpt>` issues every joint
+command from SmolVLA. `--fallback` exists only to reproduce the hybrid comparison, and the
+analytical controller alone (no `--policy`) is the baseline the policy is measured against.
+
 ```bash
 hf upload pythonsniffer/armanual-dinner-table data/armanual-dinner-table --repo-type dataset
 hf upload pythonsniffer/armanual-smolvla outputs/train/armanual_smolvla/checkpoints/last/pretrained_model
