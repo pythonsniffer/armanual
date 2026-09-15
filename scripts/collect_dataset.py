@@ -78,13 +78,15 @@ def main() -> None:
 
     rng = random.Random(args.start_seed)
     plan = instruction_plan(args.episodes_per_skill, rng)
-    # Moderate randomization by design. The demonstrations come from the analytical stack, whose
-    # colour-based detector degrades under colour and background randomization — turning those on
-    # roughly halves the expert's success rate, so the dataset ends up smaller *and* noisier.
-    # Geometry, mass, friction, lighting and clutter vary; colour and background do not.
+    # Which axes vary during *collection* is a data-quality decision, not a robustness one.
+    # Measured on eight pilot episodes: with lighting, friction and clutter randomized the
+    # analytical expert succeeds about 25% of the time, so 300 episodes yield ~75 usable
+    # demonstrations. With placement, size and mass varying it succeeds about 75%, yielding ~225.
+    # The policy is trained on the cleaner distribution and *evaluated* under full randomization,
+    # which is where generalization belongs.
     config = (
-        RandomizationConfig(colors=False, lighting=True, background=False, distractors=True,
-                            max_distractors=1, sizes=True, mass=True, friction=True)
+        RandomizationConfig(placement=True, sizes=True, mass=True, friction=False,
+                            colors=False, lighting=False, background=False, distractors=False)
         if args.randomize
         else RandomizationConfig.placement_only()
     )

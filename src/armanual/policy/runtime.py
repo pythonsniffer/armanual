@@ -213,3 +213,83 @@ class PolicyRunner:
             "sim_seconds": round(self.world.time - started, 2),
             "inference": getattr(self.backend, "stats", InferenceStats()).summary(),
         }
+
+
+class OpenVINOBackend:
+    """Run a policy with its convertible components on OpenVINO and the rest on PyTorch.
+
+    A VLA does not convert as one graph (see :mod:`armanual.policy.openvino_export`), so this
+    backend is deliberately *hybrid*: each component that produced an IR is executed by OpenVINO
+    on the chosen Intel device, and anything that did not convert stays on PyTorch. The split is
+    recorded in :attr:`placement` and written into every benchmark and evaluation record, because
+    "runs on the NPU" means nothing without saying which part.
+
+    Substitution works by wrapping the module's ``forward``: the surrounding policy code, the
+    preprocessing and the action decoding are untouched, so a difference in behaviour between this
+    backend and the PyTorch one is a real numerical difference and not a different pipeline.
+    """
+
+    def __init__(self, checkpoint: str | Path, ir_dir: str | Path, *, device: str = "CPU",
+                 torch_device: str = "cpu"):
+        import openvino as ov
+        import torch
+
+        self.torch = torch
+        self.core = ov.Core()
+        self.device = device
+        if device not in self.core.available_devices:
+            raise RuntimeError(
+                f"OpenVINO device {device!r} is not available here "
+                f"(available: {self.core.available_devices})"
+            )
+
+        self.base = LeRobotBackend(checkpoint, device=torch_device)
+        self.policy = self.base.policy
+        self.placement: dict[str, str] = {}
+        self.compiled: dict[str, object] = {}
+        self._patch_components(Path(ir_dir))
+
+        self.name = f"openvino:{device}"
+        self.action_dim = ACTION_DIM
+        self.stats = InferenceStats()
+
+    def _patch_components(self, ir_dir: Path) -> None:
+        """Replace each converted module's forward with its compiled IR."""
+        from armanual.policy.openvino_export import _find_components
+
+        components = {name: module for name, module, _example in _find_components(self.policy)}
+        for ir_path in sorted(Path(ir_dir).glob("*.xml")):
+            name = ir_path.stem
+            module = components.get(name)
+            if module is None:
+                self.placement[name] = "ir present but module not found; skipped"
+                continue
+            compiled = self.core.compile_model(self.core.read_model(ir_path), self.device)
+            self.compiled[name] = compiled
+            module.forward = self._make_forward(compiled)
+            self.placement[name] = f"openvino:{self.device}"
+        for name in components:
+            self.placement.setdefault(name, f"torch:{self.base.device.type}")
+
+    def _make_forward(self, compiled):
+        torch = self.torch
+
+        def forward(*args, **kwargs):
+            inputs = [a.detach().cpu().numpy() for a in args if hasattr(a, "detach")]
+            result = compiled(inputs)
+            outputs = [torch.from_numpy(np.asarray(result[port])) for port in compiled.outputs]
+            return outputs[0] if len(outputs) == 1 else tuple(outputs)
+
+        return forward
+
+    def reset(self) -> None:
+        self.base.reset()
+
+    def predict(self, images: dict[str, np.ndarray], state: np.ndarray, task: str) -> np.ndarray:
+        started = time.perf_counter()
+        action = self.base.predict(images, state, task)
+        self.stats.record((time.perf_counter() - started) * 1000)
+        return action
+
+    def describe(self) -> dict:
+        return {"device": self.device, "placement": dict(self.placement)}
