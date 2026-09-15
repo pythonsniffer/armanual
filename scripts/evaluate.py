@@ -28,6 +28,14 @@ def main() -> None:
     parser.add_argument("--privileged", action="store_true",
                         help="use ground-truth perception (ablation only — never for headline numbers)")
     parser.add_argument("--out", type=Path, default=None, help="directory for results.json/csv")
+    parser.add_argument("--policy", type=Path, default=None,
+                        help="policy checkpoint; without it the analytical controller runs")
+    parser.add_argument("--device", default="cuda", help="torch device for the policy")
+    parser.add_argument("--ov-device", default=None,
+                        help="run the policy through OpenVINO on this device (CPU/GPU/NPU)")
+    parser.add_argument("--ir-dir", type=Path, default=None, help="exported IR directory")
+    parser.add_argument("--no-fallback", action="store_true",
+                        help="report the policy alone, with no scripted fallback")
     args = parser.parse_args()
 
     if args.task:
@@ -38,7 +46,23 @@ def main() -> None:
         tasks = all_tasks()
     seeds = args.seed_list if args.seed_list is not None else list(range(args.seeds))
 
-    payload = run_suite(tasks, seeds, privileged=args.privileged, out_dir=args.out)
+    backend = None
+    if args.policy:
+        if args.ov_device:
+            from armanual.policy.runtime import OpenVINOBackend
+
+            if args.ir_dir is None:
+                parser.error("--ov-device requires --ir-dir (export with scripts/benchmark_intel.py)")
+            backend = OpenVINOBackend(args.policy, args.ir_dir, device=args.ov_device)
+            print(f"policy on OpenVINO {args.ov_device}: {backend.describe()}")
+        else:
+            from armanual.policy.runtime import LeRobotBackend
+
+            backend = LeRobotBackend(args.policy, device=args.device)
+            print(f"policy on {backend.name}")
+
+    payload = run_suite(tasks, seeds, privileged=args.privileged, out_dir=args.out,
+                        backend=backend, fallback=not args.no_fallback)
     print("\n" + json.dumps(payload["summary"]["overall"], indent=2))
     print("by tier:", json.dumps(payload["summary"]["by_tier"], indent=2))
     if payload["summary"].get("failure_kinds"):

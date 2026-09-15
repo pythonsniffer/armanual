@@ -158,24 +158,53 @@ def count_liquid_in_cups(world, margin: float = 0.004) -> int:
 
 def run_episode(task: TaskDefinition, seed: int, *, privileged: bool = False,
                 instruction: str | None = None, modality: str = "text",
-                capture=None, max_steps: int | None = None) -> EpisodeResult:
-    """Run one (task, seed) episode and score it."""
+                capture=None, max_steps: int | None = None,
+                backend=None, fallback: bool = True) -> EpisodeResult:
+    """Run one (task, seed) episode and score it.
+
+    With ``backend`` set, the episode runs through the subgoal runner and the learned policy;
+    without it, the analytical controller runs the same instruction on the same seed. That is
+    what makes the policy-versus-scripted comparison an apples-to-apples one.
+    """
     scene = sample_scene(seed, task.randomization)
     world = World(scene)
     observer = PrivilegedObserver(world) if privileged else CameraObserver(world)
-    executor = ClosedLoopExecutor(world, observer, max_steps=max_steps or task.max_steps)
-    if capture is not None:
-        executor.on_frame.append(capture)
 
     text = instruction or task.instruction
     if task.style and "style" not in text:
         text = f"{text} in the {task.style} style"
     start_positions = _object_positions(world)
-
     started = time.perf_counter()
-    record: EpisodeRecord = executor.run(text, modality=modality, seed=seed)
+
+    if backend is not None:
+        from armanual.planning.subgoals import SubgoalRunner
+
+        runner = SubgoalRunner(world, observer, backend=backend, fallback=fallback)
+        if capture is not None:
+            runner.on_frame.append(capture)
+        subgoal_episode = runner.run(text, style=task.style, seed=seed)
+        record_dict = subgoal_episode.to_dict()
+        record_dict["subtask_success_rate"] = subgoal_episode.success_rate
+        record_dict["steps_attempted"] = len(subgoal_episode.results)
+        record_dict["steps_succeeded"] = sum(r.success for r in subgoal_episode.results)
+        record_dict["replans"] = 0
+        failure_kinds = sorted(
+            {"policy" if r.executor == "policy" else "fallback"
+             for r in subgoal_episode.results if not r.success}
+        )
+        sim_seconds = subgoal_episode.sim_seconds
+        observer_label = f"{'privileged' if privileged else 'camera'}+{runner.mode}"
+    else:
+        executor = ClosedLoopExecutor(world, observer, max_steps=max_steps or task.max_steps)
+        if capture is not None:
+            executor.on_frame.append(capture)
+        record: EpisodeRecord = executor.run(text, modality=modality, seed=seed)
+        record_dict = record.to_dict()
+        failure_kinds = sorted({s.failure_kind for s in record.steps if s.failure_kind})
+        sim_seconds = record.sim_seconds
+        observer_label = "privileged" if privileged else "camera"
+
     criteria = [check_criterion(world, c, task, start_positions) for c in task.criteria]
-    failure_kinds = sorted({s.failure_kind for s in record.steps if s.failure_kind})
 
     result = EpisodeResult(
         task_id=task.id,
@@ -183,13 +212,13 @@ def run_episode(task: TaskDefinition, seed: int, *, privileged: bool = False,
         seed=seed,
         instruction=text,
         modality=modality,
-        observer="privileged" if privileged else "camera",
+        observer=observer_label,
         success=all(c.passed for c in criteria) if criteria else False,
         criteria=criteria,
-        episode=record.to_dict(),
+        episode=record_dict,
         failure_kinds=failure_kinds,
         wall_seconds=time.perf_counter() - started,
-        sim_seconds=record.sim_seconds,
+        sim_seconds=sim_seconds,
     )
     observer.close()
     world.close()
@@ -251,12 +280,14 @@ def environment_info() -> dict:
 
 
 def run_suite(tasks: list[TaskDefinition], seeds: list[int], *, privileged: bool = False,
-              out_dir: Path | None = None, progress=print) -> dict:
+              out_dir: Path | None = None, progress=print, backend=None,
+              fallback: bool = True) -> dict:
     """Run every (task, seed) pair and write machine-readable results."""
     results: list[EpisodeResult] = []
     for task in tasks:
         for seed in seeds:
-            result = run_episode(task, seed, privileged=privileged)
+            result = run_episode(task, seed, privileged=privileged, backend=backend,
+                                 fallback=fallback)
             results.append(result)
             if progress:
                 marks = "".join("+" if c.passed else "-" for c in result.criteria)
@@ -270,6 +301,7 @@ def run_suite(tasks: list[TaskDefinition], seeds: list[int], *, privileged: bool
     payload = {
         "environment": environment_info(),
         "observer": "privileged" if privileged else "camera",
+        "controller": getattr(backend, "name", "scripted"),
         "seeds": seeds,
         "tasks": [t.id for t in tasks],
         "summary": summarize(results),
