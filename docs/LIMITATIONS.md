@@ -53,10 +53,16 @@ generalize across scenes. Ambiguity is reported when the runner-up scores within
 **The policy operates on subgoals, not the whole task.** One instruction is decomposed into three
 or four language subgoals, each executed by the policy. A single policy trained end-to-end on this
 amount of data would not complete the full workflow; this is stated in the results rather than
-implied away.
+implied away. The decomposition produces *sentences* — the policy still issues every motor command.
+
+**The deployed system has no fallback.** If the policy fails a subgoal, the episode records the
+failure; nothing rescues it. That is the honest way to report a VLA's capability, and it means the
+headline success rate is lower than a hybrid system's would be.
 
 **Demonstrations come from the analytical expert**, so the policy inherits its failure modes and
-cannot exceed it on skills where the expert is weak. It is trained on successful episodes only.
+is unlikely to exceed it on skills where the expert is weak. It is trained on successful episodes
+only. The expert appears nowhere in a policy run — it is the data source and the baseline, not a
+safety net.
 
 **Collection randomization is narrower than evaluation randomization.** Deliberate: the expert's
 success rate falls from ~75% to ~25% with lighting, friction and clutter enabled, which would

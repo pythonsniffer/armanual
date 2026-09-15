@@ -100,9 +100,10 @@ python scripts/evaluate.py --policy <checkpoint> --seeds 10 --out outputs/eval_p
 python scripts/evaluate.py --policy <checkpoint> --no-fallback --seeds 10   # policy alone
 ```
 
-Three columns are reported on the same tasks and seeds: analytical, policy alone, and policy with
-the analytical fallback. The third is what a deployed system would do; reporting all three keeps
-the policy from being credited with the fallback's successes.
+The deployed system is **pure VLA**: every joint command comes from the policy and nothing rescues
+a failed subgoal. Two columns are reported on the same tasks and seeds — the analytical baseline
+(what the demonstration generator achieves) and the policy — so the gap between them is visible
+rather than papered over.
 
 ### Policy-only progress during training
 
