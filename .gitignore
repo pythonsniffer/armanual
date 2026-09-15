@@ -27,3 +27,8 @@ wandb/
 
 # OS
 .DS_Store
+
+# Datasets and training artifacts
+data/
+outputs/
+*.log

@@ -19,7 +19,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from armanual.policy.collect import collect_episode  # noqa: E402
+from armanual.policy.parallel import collect_parallel  # noqa: E402
 from armanual.policy.tasks import SKILLS  # noqa: E402
 from armanual.sim.randomize import RandomizationConfig  # noqa: E402
 
@@ -72,53 +72,67 @@ def main() -> None:
                         help="record unsuccessful episodes too (off by default)")
     parser.add_argument("--dry-run", action="store_true",
                         help="record but do not write a dataset; prints per-episode outcomes")
+    parser.add_argument("--workers", type=int, default=8,
+                        help="parallel simulation workers; rendering is CPU-bound so this scales")
     args = parser.parse_args()
 
     rng = random.Random(args.start_seed)
     plan = instruction_plan(args.episodes_per_skill, rng)
+    # Moderate randomization by design. The demonstrations come from the analytical stack, whose
+    # colour-based detector degrades under colour and background randomization — turning those on
+    # roughly halves the expert's success rate, so the dataset ends up smaller *and* noisier.
+    # Geometry, mass, friction, lighting and clutter vary; colour and background do not.
     config = (
-        RandomizationConfig(colors=True, lighting=True, background=True, distractors=True,
-                            max_distractors=2)
+        RandomizationConfig(colors=False, lighting=True, background=False, distractors=True,
+                            max_distractors=1, sizes=True, mass=True, friction=True)
         if args.randomize
         else RandomizationConfig.placement_only()
     )
 
     dataset = None
+    append_episode = None
     if not args.dry_run:
         from armanual.policy.lerobot_export import append_episode, create_dataset
 
         dataset = create_dataset(args.repo_id, args.root, use_videos=not args.no_videos,
                                  overwrite=args.overwrite)
 
+    jobs = [
+        {
+            "instruction": instruction,
+            "seed": args.start_seed + index,
+            "skill": skill,
+            "pre_open_drawer": needs_drawer,
+            "max_steps": 2 if skill != "open_drawer" else 1,
+            "randomization": config.__dict__,
+        }
+        for index, (instruction, skill, needs_drawer) in enumerate(plan)
+    ]
+
     stats = {"recorded": 0, "kept": 0, "frames": 0, "per_skill": {}, "failures": {}}
     started = time.perf_counter()
-    for index, (instruction, skill, needs_drawer) in enumerate(plan):
-        seed = args.start_seed + index
-        episode = collect_episode(
-            instruction, seed, skill=skill, randomization=config,
-            pre_open_drawer=needs_drawer,
-            max_steps=2 if skill != "open_drawer" else 1,
-        )
+    for encoded in collect_parallel(jobs, workers=args.workers):
         stats["recorded"] += 1
-        keep = episode.success or args.keep_failures
-        flag = "ok " if episode.success else "FAIL"
+        skill = encoded.skill
+        keep = encoded.success or args.keep_failures
+        flag = "ok  " if encoded.success else "FAIL"
+        rate = stats["recorded"] / max(time.perf_counter() - started, 1e-6) * 60
         print(
-            f"[{index + 1:4d}/{len(plan)}] seed {seed} {flag} {len(episode):4d} frames  "
-            f"{skill:12s} {instruction!r} {('' if episode.success else episode.notes[:60])}",
+            f"[{stats['recorded']:4d}/{len(jobs)}] seed {encoded.seed} {flag} "
+            f"{len(encoded):4d} frames  {skill:12s} {encoded.task!r} "
+            f"({rate:.1f} ep/min) {'' if encoded.success else encoded.notes[:50]}",
             flush=True,
         )
-        if not episode.success:
+        if not encoded.success:
             stats["failures"][skill] = stats["failures"].get(skill, 0) + 1
-        if keep and len(episode) and dataset is not None:
-            from armanual.policy.lerobot_export import append_episode
-
-            stats["frames"] += append_episode(dataset, episode)
-            stats["kept"] += 1
-            stats["per_skill"][skill] = stats["per_skill"].get(skill, 0) + 1
-        elif keep and len(episode):
-            stats["kept"] += 1
-            stats["frames"] += len(episode)
-            stats["per_skill"][skill] = stats["per_skill"].get(skill, 0) + 1
+        if not (keep and len(encoded)):
+            continue
+        stats["kept"] += 1
+        stats["per_skill"][skill] = stats["per_skill"].get(skill, 0) + 1
+        if dataset is not None:
+            stats["frames"] += append_episode(dataset, encoded.decode())
+        else:
+            stats["frames"] += len(encoded)
 
     stats["wall_seconds"] = round(time.perf_counter() - started, 1)
     print("\n" + json.dumps(stats, indent=2))

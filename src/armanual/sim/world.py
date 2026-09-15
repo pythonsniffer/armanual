@@ -52,12 +52,17 @@ class ArmHandle:
 class World:
     """A compiled, steppable dinner-table episode."""
 
-    def __init__(self, scene: SceneSpec, *, render_size: tuple[int, int] = (320, 240)):
+    def __init__(self, scene: SceneSpec, *, render_size: tuple[int, int] = (320, 240),
+                 fast_render: bool = False):
         render_backend.select_backend()
         self.scene = scene
         self.model, self.spec = build_model(scene)
         self.data = mujoco.MjData(self.model)
         self.render_size = render_size
+        #: Shadow mapping costs ~3x the frame time under WSL's software rasterizer (measured:
+        #: 286 ms -> 101 ms at 224x224). Dataset collection turns it off; the demo video leaves
+        #: it on, and the policy is trained on whichever setting collection used.
+        self.fast_render = fast_render
         self._renderers: dict[tuple[int, int], mujoco.Renderer] = {}
         self._scratch: mujoco.MjData | None = None
         self._arm_geoms: dict[str, set[int]] = {}
@@ -261,7 +266,11 @@ class World:
         width, height = size or self.render_size
         key = (width, height)
         if key not in self._renderers:
-            self._renderers[key] = mujoco.Renderer(self.model, height=height, width=width)
+            renderer = mujoco.Renderer(self.model, height=height, width=width)
+            if self.fast_render:
+                renderer.scene.flags[mujoco.mjtRndFlag.mjRND_SHADOW] = 0
+                renderer.scene.flags[mujoco.mjtRndFlag.mjRND_REFLECTION] = 0
+            self._renderers[key] = renderer
         renderer = self._renderers[key]
         renderer.update_scene(self.data, camera=camera)
         return renderer.render()

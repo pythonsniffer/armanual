@@ -110,10 +110,11 @@ def collect_episode(
     max_steps: int = 3,
     pre_open_drawer: bool = False,
     image_size: tuple[int, int] = IMAGE_SIZE,
+    fast_render: bool = True,
 ) -> DemoEpisode:
     """Run one instruction with the scripted stack and return the recorded demonstration."""
     scene = sample_scene(seed, randomization or RandomizationConfig.placement_only())
-    world = World(scene)
+    world = World(scene, fast_render=fast_render)
     observer = CameraObserver(world)
     episode = DemoEpisode(task=instruction, seed=seed, skill=skill)
 
@@ -137,7 +138,7 @@ def collect_episode(
     episode.steps = [s.to_dict() for s in record.steps]
     episode.success = bool(record.steps) and all(s.status == "success" for s in record.steps)
     episode.notes = "; ".join(
-        f"{s.id}:{s.error}" for s in record.steps if s.error
+        f"{s.step_id}:{s.error}" for s in record.steps if s.error
     ) or record.finished_reason
 
     observer.close()
