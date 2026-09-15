@@ -1,0 +1,30 @@
+[project]
+name = "armanual"
+version = "0.1.0"
+description = "Bimanual VLA manipulation with multi-modal reasoning - dinner table setup on dual SO-101 arms (Intel Physical AI Challenge)"
+requires-python = ">=3.10"
+dependencies = [
+    "mujoco>=3.13",
+    "numpy>=1.26",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "ruff>=0.6"]
+speech = ["speechmatics-python"]
+openvino = ["openvino>=2024.4", "nncf"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
