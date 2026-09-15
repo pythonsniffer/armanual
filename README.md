@@ -112,12 +112,14 @@ See [docs/INTEL.md](docs/INTEL.md).
 
 | Doc | What is in it |
 | --- | --- |
+| [SETUP.md](docs/SETUP.md) | Installation, including the version constraints that bite |
 | [ARCHITECTURE.md](docs/ARCHITECTURE.md) | System design, data flow, why each layer exists |
 | [REQUIREMENTS.md](docs/REQUIREMENTS.md) | Traceability: official / user / engineering / open, plus the rubric map |
 | [WORKSPACE.md](docs/WORKSPACE.md) | Generated measurements: reach, holding torque, jaw geometry |
 | [INTEL.md](docs/INTEL.md) | OpenVINO export, device placement, benchmark protocol |
 | [RESULTS.md](docs/RESULTS.md) | Measured results with the commands that produced them |
 | [LIMITATIONS.md](docs/LIMITATIONS.md) | What does not work, and how far off it is |
+| [DEMO.md](docs/DEMO.md) | Video shot list, mapped to the rubric |
 | [REPO_RECON.md](docs/REPO_RECON.md) | Phase 0 survey of the environment and assets |
 
 ## License
