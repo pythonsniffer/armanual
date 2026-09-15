@@ -86,7 +86,8 @@ python scripts/train_policy.py --policy smolvla --steps 20000
 | Trainable | action expert only; SigLIP vision tower frozen |
 | Batch | 2 × 16 gradient accumulation = effective 32 |
 | Images | 256×256 (dataset is 224×224; padding to the pretrained 512 adds no information and costs ~4× the vision compute) |
-| Measured step time | **0.22 s/step** on the RTX 5050 → 20k steps ≈ 75 min |
+| Measured step time | 0.22 s/step at batch 2; **0.46 s/step at batch 16** (2.17 steps/s) → 20k steps ≈ 2h26m |
+| Bottleneck | GPU compute at batch 16 (`updt_s` 0.44, `data_s` 0.007). At batch 2 it was the dataloader instead, which is why the larger batch is nearly free |
 
 Two integration details that are easy to miss and cost an hour each: SmolVLA's pretrained config
 names its cameras `camera1..3`, so a `--rename_map` is required; and torchcodec needs real FFmpeg
