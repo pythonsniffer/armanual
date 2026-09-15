@@ -35,8 +35,8 @@ So the deployable split today is: **vision tower and connector on the Intel devi
 PyTorch**. That is not a disappointing result — the vision tower runs *once per camera* and the
 policy uses three, so it is the largest single term in the inference budget.
 
-So `armanual/policy/openvino_export.py` converts **each component separately** and records the
-outcome of each, and `OpenVINOBackend` runs the converted ones on the Intel device while leaving
+`armanual/policy/openvino_export.py` therefore converts **each component separately** and records
+the outcome of each, and `OpenVINOBackend` runs the converted ones on the Intel device while leaving
 the rest on PyTorch. The placement is written into every results file. A claim like "the VLA runs
 on the NPU" would be false for any current VLA; "the vision tower runs on the NPU, the action
 expert on the iGPU, and the language model on the CPU" is both true and useful.
