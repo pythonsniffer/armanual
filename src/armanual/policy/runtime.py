@@ -69,11 +69,19 @@ class PolicyBackend(Protocol):
 
 
 class LeRobotBackend:
-    """A LeRobot policy (SmolVLA, ACT, ...) running under PyTorch."""
+    """A LeRobot policy (SmolVLA, ACT, ...) running under PyTorch.
+
+    Inference goes through the **processor pipeline saved with the checkpoint**, not a hand-built
+    batch. That pipeline is what renames the cameras to the names the policy was trained with,
+    adds the batch dimension, tokenizes the instruction into ``observation.language.tokens`` and
+    applies the dataset normalization. Reconstructing any of that by hand is how an inference path
+    silently diverges from training — SmolVLA raises a `KeyError` for the missing language tokens,
+    but a normalization mismatch would just produce quietly wrong actions.
+    """
 
     def __init__(self, checkpoint: str | Path, device: str = "cuda", *, dtype: str = "float32"):
         import torch
-        from lerobot.policies.factory import get_policy_class
+        from lerobot.policies.factory import get_policy_class, make_pre_post_processors
 
         self.torch = torch
         self.device = torch.device(
@@ -83,34 +91,19 @@ class LeRobotBackend:
         self.policy = self._load(checkpoint, get_policy_class)
         self.policy.to(self.device)
         self.policy.eval()
-        if dtype == "bfloat16" and self.device.type == "cuda":
-            self.policy = self.policy.to(torch.bfloat16)
+        # The saved pipeline carries a device_processor pinned to whatever trained the policy
+        # (cuda here). Override it so the pipeline follows the device this backend runs on —
+        # otherwise inference on CPU feeds CUDA tensors to CPU weights, or vice versa.
+        self.preprocessor, self.postprocessor = make_pre_post_processors(
+            self.policy.config,
+            pretrained_path=checkpoint,
+            preprocessor_overrides={"device_processor": {"device": self.device.type}},
+            postprocessor_overrides={"device_processor": {"device": "cpu"}},
+        )
         self.dtype = getattr(torch, dtype)
         self.name = f"torch:{self.device.type}"
         self.action_dim = ACTION_DIM
         self.stats = InferenceStats()
-        self.image_keys = self._image_key_map()
-
-    def _image_key_map(self) -> dict[str, str]:
-        """Map our camera names to whatever the trained policy calls them.
-
-        SmolVLA's pretrained config names its cameras ``camera1..3`` and training renames our
-        keys to match. Inference has to apply the *same* rename or the policy receives an
-        observation with no images at all — which does not raise, it just produces nonsense.
-        """
-        expected = [
-            key for key in getattr(self.policy.config, "input_features", {})
-            if key.startswith("observation.images.")
-        ]
-        ours = [key for key, _camera in CAMERAS]
-        if not expected or set(expected) == set(ours):
-            return {key: key for key in ours}
-        if len(expected) != len(ours):
-            raise RuntimeError(
-                f"policy expects {len(expected)} cameras {expected}, dataset provides "
-                f"{len(ours)} {ours}"
-            )
-        return dict(zip(ours, sorted(expected)))
 
     @staticmethod
     def _load(checkpoint: str, get_policy_class):
@@ -130,17 +123,22 @@ class LeRobotBackend:
 
     def predict(self, images: dict[str, np.ndarray], state: np.ndarray, task: str) -> np.ndarray:
         torch = self.torch
-        batch = {}
-        for key, _camera in CAMERAS:
-            image = torch.from_numpy(images[key]).to(self.device)
-            image = image.permute(2, 0, 1).unsqueeze(0).to(torch.float32) / 255.0
-            batch[self.image_keys[key]] = image
-        batch["observation.state"] = torch.from_numpy(np.asarray(state, dtype=np.float32)).unsqueeze(0).to(self.device)
-        batch["task"] = [task]
+        # Unbatched tensors with the *dataset's* key names: the pipeline batches and renames.
+        batch = {
+            key: torch.from_numpy(np.ascontiguousarray(images[key])).permute(2, 0, 1).to(
+                torch.float32
+            )
+            / 255.0
+            for key, _camera in CAMERAS
+        }
+        batch["observation.state"] = torch.from_numpy(np.asarray(state, dtype=np.float32))
+        batch["task"] = task
 
         started = time.perf_counter()
         with torch.inference_mode():
-            action = self.policy.select_action(batch)
+            processed = self.preprocessor(batch)
+            action = self.policy.select_action(processed)
+            action = self.postprocessor(action)
         if self.device.type == "cuda":
             torch.cuda.synchronize()
         self.stats.record((time.perf_counter() - started) * 1000)
