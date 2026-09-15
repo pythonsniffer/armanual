@@ -64,6 +64,9 @@ class Detection:
     category: str
     pixel_area: int
     elongation: float  # major/minor axis ratio of the footprint
+    #: Direction of the footprint's major axis, radians in the table plane. Meaningful for
+    #: elongated objects (a utensil must be grasped *across* its handle, not along it).
+    orientation: float = 0.0
     confidence: float = 1.0
     track_id: int | None = None
     #: Name assigned by association with an expected object list, when one is supplied.
@@ -196,11 +199,15 @@ class TabletopDetector:
             centroid_xy = np.median(blob_points[:, :2], axis=0)
             top_z = float(np.percentile(blob_points[:, 2], 95))
             centered = blob_points[:, :2] - centroid_xy
+            orientation = 0.0
             if len(centered) >= 3:
                 cov = np.cov(centered.T)
-                eigenvalues = np.sort(np.abs(np.linalg.eigvalsh(cov)))[::-1]
-                major = float(np.sqrt(max(eigenvalues[0], 1e-9)))
-                minor = float(np.sqrt(max(eigenvalues[1], 1e-12)))
+                eigenvalues, eigenvectors = np.linalg.eigh(cov)
+                order = np.argsort(np.abs(eigenvalues))[::-1]
+                major = float(np.sqrt(max(abs(eigenvalues[order[0]]), 1e-9)))
+                minor = float(np.sqrt(max(abs(eigenvalues[order[1]]), 1e-12)))
+                axis = eigenvectors[:, order[0]]
+                orientation = float(np.arctan2(axis[1], axis[0]))
             else:
                 major = minor = 0.01
             radius = float(np.percentile(np.linalg.norm(centered, axis=1), 92))
@@ -222,6 +229,7 @@ class TabletopDetector:
                     category=category,
                     pixel_area=area,
                     elongation=elongation,
+                    orientation=orientation,
                     confidence=float(np.clip(0.45 + 0.4 * color_conf + min(area, 600) / 3000, 0, 1)),
                 )
             )

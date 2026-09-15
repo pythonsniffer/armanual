@@ -145,17 +145,29 @@ def retreat(world, arm: str, height: float = 0.12, duration: float = 0.8, dt: fl
 
 # ------------------------------------------------------------------------------ pick and place
 def grasp_at(world, arm: str, grasp: GraspSpec, *, dt: float = 0.05,
-             ignore_geoms: set[int] | None = None) -> Skill:
-    """Execute a grasp: pre-open, approach from above, descend, close, lift.
+             ignore_geoms: set[int] | None = None, refiner=None) -> Skill:
+    """Execute a grasp: pre-open, approach from above, look again, descend, close, lift.
 
     ``ignore_geoms`` should hold the target object's geoms: the jaws are *meant* to touch it, so
     the collision screen must not treat that contact as a reason to reject the pose.
+
+    ``refiner`` (a :class:`~armanual.perception.refine.WristRefiner`) re-localizes the object from
+    the wrist camera once the arm is hovering above it. At that range the object is a few hundred
+    pixels across instead of a few dozen, which is the difference between closing on a plate's rim
+    and closing on air.
     """
     offset = grasp.tool_offset
     yield from set_gripper(world, arm, grasp.pre_open, settle=0.15, dt=dt)
     yield from goto_pose(world, arm, grasp.approach_pos(), jaw=grasp.jaw, duration=1.2, dt=dt,
                          tolerance=0.02, label=f"pre-grasp({grasp.label})", tool_offset=offset,
                          ignore_geoms=ignore_geoms)
+    if refiner is not None:
+        from armanual.perception.refine import refine_grasp
+
+        refined, result = refine_grasp(refiner, arm, grasp)
+        if result is not None:
+            grasp = refined
+            offset = grasp.tool_offset
     yield from goto_pose_linear(world, arm, grasp.pos - UP * grasp.seat, jaw=grasp.jaw,
                                 duration=0.9, dt=dt, steps=5, label=f"grasp({grasp.label})",
                                 tool_offset=offset, ignore_geoms=ignore_geoms)
@@ -370,3 +382,190 @@ def _object_yaw(world, obj_name: str) -> float:
     quat = world.object_quat(obj_name)
     w, x, y, z = quat
     return float(np.arctan2(2 * (w * z + x * y), 1 - 2 * (y * y + z * z)))
+
+
+# ------------------------------------------------------- proprioceptive grasp verification
+def held_width(world, arm: str) -> float:
+    """Distance between the jaw tips right now, in metres.
+
+    A real robot checks a grasp with its own gripper feedback, not by asking the simulator where
+    the object went. After closing on an object the jaws stall at its width; closing on nothing
+    bottoms out near zero. That difference is the whole check.
+    """
+    from armanual.control.gripper import FIXED_JAW, moving_jaw_z
+
+    return float(abs(moving_jaw_z(world.gripper_opening(arm)) - FIXED_JAW[2]))
+
+
+def holding_something(world, arm: str, expected_width: float = 0.0,
+                      tolerance: float = 0.016) -> bool:
+    """True when the jaws are stalled at a plausible object width."""
+    width = held_width(world, arm)
+    if width < 0.005:
+        return False
+    if expected_width <= 0.0:
+        return True
+    return abs(width - expected_width) < max(tolerance, 0.5 * expected_width)
+
+
+def pick_detected(world, arm: str, grasp: GraspSpec, *, dt: float = 0.05,
+                  verify: bool = True, refiner=None, attempts: int = 3) -> Skill:
+    """Grasp a perceived object, verified with gripper feedback, re-grasping if the jaws close empty.
+
+    Contacts with whatever sits at the grasp point are expected — that is the object being
+    picked — so those geoms are excluded from the collision screen. Everything else on the table
+    still counts, so a grasp that would sweep a neighbouring cup off the table is still rejected.
+
+    The retry matters more than it looks. A thin feature like a plate's rim is about as wide as
+    the combined perception and tracking error, so a first attempt lands slightly high or slightly
+    outside perhaps half the time. Detecting that from the gripper's own feedback and trying again
+    a couple of millimetres lower — exactly what a person does — turns a coin flip into a
+    dependable pick, and it is honest about *why* it succeeded, because every attempt is logged.
+    """
+    from dataclasses import replace
+
+    dither = (0.0, -0.0025, 0.0035)
+    last_gap = 0.0
+    for attempt in range(max(1, attempts)):
+        candidate = grasp
+        if attempt:
+            adjusted = grasp.pos.copy()
+            adjusted[2] = max(0.005, adjusted[2] + dither[attempt % len(dither)])
+            candidate = replace(grasp, pos=adjusted)
+        yield from grasp_at(world, arm, candidate, dt=dt, refiner=refiner if attempt == 0 else None,
+                            ignore_geoms=world.geoms_near(candidate.pos, radius=0.07))
+        if not verify or holding_something(world, arm, candidate.width):
+            return
+        last_gap = held_width(world, arm)
+        if attempt < attempts - 1:
+            # Open up and clear the object before trying again, so the retry starts from a known
+            # pose rather than from wherever the failed close left the jaws.
+            yield from set_gripper(world, arm, candidate.pre_open, settle=0.2, dt=dt)
+            yield from goto_pose(world, arm, candidate.approach_pos(), jaw=candidate.jaw,
+                                 duration=0.7, dt=dt, tolerance=0.03, label="regrasp-clear",
+                                 tool_offset=candidate.tool_offset,
+                                 ignore_geoms=world.geoms_near(candidate.pos, radius=0.07))
+    raise SkillFailure(
+        f"{arm}: closed on nothing at {np.round(grasp.pos, 3).tolist()} after {attempts} attempts "
+        f"(jaw gap {last_gap * 1000:.0f}mm, expected ~{grasp.width * 1000:.0f}mm)",
+        kind="grasp",
+    )
+
+
+def place_held(world, arm: str, target_xy, *, height: float = 0.035, dt: float = 0.05,
+               jaw: np.ndarray | None = None, release: float = 0.5,
+               tool_offset: np.ndarray | None = None, hover: float = 0.05) -> Skill:
+    """Put whatever the arm is holding down at a table position, then back off.
+
+    ``hover`` is deliberately modest: the arm's reachable envelope shrinks quickly with height
+    (docs/WORKSPACE.md), so a tall approach hover turns reachable placements into unreachable
+    ones near the workspace edge.
+    """
+    from armanual.control.kinematics import solve_reach
+
+    target = np.array([float(target_xy[0]), float(target_xy[1]), height])
+    # Pick the highest hover the arm can actually reach: approaching from above is safer, but at
+    # the edge of the workspace a high hover is simply not reachable and a low one is.
+    chosen = hover
+    for candidate in (hover, hover * 0.7, hover * 0.45):
+        if solve_reach(world, arm, target + UP * candidate, jaw=jaw, tool_offset=tool_offset,
+                       ignore_geoms=world.geoms_near(target, radius=0.09)).feasible:
+            chosen = candidate
+            break
+    hover = chosen
+    yield from goto_pose(world, arm, target + UP * hover, jaw=jaw, duration=1.3, dt=dt,
+                         tolerance=0.03, label="pre-place", tool_offset=tool_offset,
+                         ignore_geoms=world.geoms_near(target, radius=0.09))
+    yield from goto_pose_linear(world, arm, target, jaw=jaw, duration=0.8, dt=dt, steps=4,
+                                tolerance=0.025, label="place", tool_offset=tool_offset,
+                                ignore_geoms=world.geoms_near(target, radius=0.09))
+    yield from set_gripper(world, arm, release, settle=0.35, dt=dt)
+    yield from goto_pose_linear(world, arm, target + UP * hover, jaw=jaw, duration=0.7, dt=dt,
+                                steps=3, tolerance=0.04, label="post-place")
+
+
+def handoff_give(world, giver: str, meeting, width: float, sync: "Rendezvous",
+                 *, dt: float = 0.05) -> Skill:
+    """Giver half of a hand-off: present the held object at the meeting point, then let go."""
+    meeting = np.asarray(meeting, dtype=float)
+    jaw = np.array([1.0, 0.0, 0.0])
+    yield from goto_pose(world, giver, meeting, jaw=jaw, duration=1.5, dt=dt, tolerance=0.03,
+                         label="handoff-present")
+    sync.mark("giver_ready")
+    yield from sync.wait_for("receiver_gripped")
+    yield from set_gripper(world, giver, 0.55, settle=0.4, dt=dt)
+    sync.mark("giver_released")
+    yield from retreat(world, giver, height=0.10, duration=0.9, dt=dt)
+
+
+def handoff_take(world, receiver: str, meeting, width: float, sync: "Rendezvous",
+                 *, dt: float = 0.05) -> Skill:
+    """Receiver half: wait for the object to be presented, close on it, take it away.
+
+    The receiver approaches across the table rather than from above, so the two grippers meet
+    jaw-to-jaw instead of one descending onto the other.
+    """
+    from armanual.control.gripper import opening_for_width, pinch_offset
+
+    meeting = np.asarray(meeting, dtype=float)
+    jaw = np.array([0.0, 1.0, 0.0])
+    offset = pinch_offset(width)
+    yield from set_gripper(world, receiver, opening_for_width(width, clearance=0.020),
+                           settle=0.1, dt=dt)
+    stage = meeting + np.array([0.0, 0.0, 0.10])
+    yield from goto_pose(world, receiver, stage, jaw=jaw, duration=1.3, dt=dt, tolerance=0.035,
+                         label="handoff-stage")
+    yield from sync.wait_for("giver_ready")
+    yield from goto_pose_linear(world, receiver, meeting, jaw=jaw, duration=1.0, dt=dt, steps=4,
+                                tolerance=0.025, label="handoff-approach", tool_offset=offset)
+    yield from set_gripper(world, receiver, 0.0, settle=0.5, dt=dt)
+    sync.mark("receiver_gripped")
+    yield from sync.wait_for("giver_released")
+    yield from goto_pose_linear(world, receiver, meeting + np.array([0.0, -0.05, 0.06]), jaw=jaw,
+                                duration=0.9, dt=dt, steps=3, tolerance=0.045,
+                                label="handoff-clear")
+
+
+def pour_over(world, arm: str, cup_xyz, *, tilt_angle: float = 2.0, hold_seconds: float = 1.8,
+              height: float = 0.155, dt: float = 0.05) -> Skill:
+    """Pour the held bottle over a cup at ``cup_xyz`` by rolling the wrist.
+
+    The spout is offset to the near side of the cup before tilting, so the bottle's mouth ends up
+    over the opening rather than over the rim. Liquid is modelled as particles (see
+    :mod:`armanual.sim.builder`), so a pour that misses is visibly a miss.
+    """
+    handle = world.arms[arm]
+    cup = np.asarray(cup_xyz, dtype=float)
+    above = np.array([cup[0], cup[1], height])
+    radial = above[:2] - world.base_pos(arm)[:2]
+    radial = radial / (np.linalg.norm(radial) + 1e-9)
+    spout = np.array([above[0] - radial[0] * 0.030, above[1] - radial[1] * 0.030, above[2]])
+
+    yield from goto_pose(world, arm, spout, duration=1.6, dt=dt, tolerance=0.035,
+                         label="pour-above")
+    roll = handle.actuator_ids[4]
+    start = float(world.data.ctrl[roll])
+    target = start + tilt_angle
+    ticks = max(1, int(round(1.2 / dt)))
+    for i in range(1, ticks + 1):
+        world.data.ctrl[roll] = start + (target - start) * _smoothstep(i / ticks)
+        yield
+    yield from wait(hold_seconds, dt=dt)
+    for i in range(1, ticks + 1):
+        world.data.ctrl[roll] = target + (start - target) * _smoothstep(i / ticks)
+        yield
+
+
+def steady_and_hold(world, arm: str, grasp: GraspSpec, *, seconds: float = 8.0,
+                    dt: float = 0.05) -> Skill:
+    """Complementary action: grasp an object and hold it still while the other arm works.
+
+    Used for hold-the-cup-while-pouring. The hold is active — the arm keeps commanding its
+    configuration — so the cup resists the nudge of the pour instead of being merely adjacent.
+    """
+    yield from grasp_at(world, arm, grasp, dt=dt)
+    if not holding_something(world, arm, grasp.width):
+        raise SkillFailure(f"{arm}: could not take hold of the object to steady it", kind="grasp")
+    yield from hold(world, arm, seconds, dt=dt)
+    yield from set_gripper(world, arm, 0.55, settle=0.3, dt=dt)
+    yield from retreat(world, arm, height=0.08, duration=0.8, dt=dt)

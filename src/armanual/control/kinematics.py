@@ -16,6 +16,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from armanual.control.ik import IKResult, grasp_frame, solve_ik
+from armanual.sim.builder import GRIPPER_CLOSED, GRIPPER_OPEN
 
 #: Searched in order. 0.0 is a pure top-down grasp; larger values lean the wrist outward, which
 #: is what buys reach near the workspace boundary (see docs/WORKSPACE.md).
@@ -86,6 +87,7 @@ def solve_reach(
     check_collision: bool = True,
     ignore_geoms: set[int] | None = None,
     tool_offset: np.ndarray | None = None,
+    gripper: float | None = None,
 ) -> ReachSolution:
     """Best (lowest-cost) way for ``arm`` to reach ``target``; check ``.feasible`` before using.
 
@@ -195,7 +197,14 @@ def holdable(world, arm: str, qpos: np.ndarray, *, payload: float = 0.0,
 COLLISION_DEPTH = 0.0015
 
 
-def colliding_pairs(world, arm: str, qpos: np.ndarray, ignore_geoms: set[int] | None = None):
+#: Gripper command assumed when screening a *candidate* pose whose grasp aperture is not known
+#: yet — a planner query, say. The home pose leaves the jaws wide open, and a wide-open gripper
+#: sweeps a large enough volume to make almost every table pose look blocked.
+PLANNING_OPENING = 0.35
+
+
+def colliding_pairs(world, arm: str, qpos: np.ndarray, ignore_geoms: set[int] | None = None,
+                    gripper: float | None = None):
     """Contacts between ``arm`` at ``qpos`` and anything it should not be pressing into.
 
     Uses the simulator's own broad/narrow phase on a scratch state, so the check sees exactly the
@@ -208,6 +217,10 @@ def colliding_pairs(world, arm: str, qpos: np.ndarray, ignore_geoms: set[int] | 
     scratch = world.scratch_data()
     scratch.qpos[:] = world.data.qpos
     scratch.qpos[handle.qpos_adr[:5]] = np.asarray(qpos, dtype=float)[:5]
+    if gripper is not None:
+        scratch.qpos[handle.qpos_adr[5]] = GRIPPER_CLOSED + float(
+            np.clip(gripper, 0.0, 1.0)
+        ) * (GRIPPER_OPEN - GRIPPER_CLOSED)
     mujoco.mj_kinematics(world.model, scratch)
     mujoco.mj_collision(world.model, scratch)
 
@@ -229,5 +242,6 @@ def colliding_pairs(world, arm: str, qpos: np.ndarray, ignore_geoms: set[int] | 
     return hits
 
 
-def collision_free(world, arm: str, qpos: np.ndarray, ignore_geoms: set[int] | None = None) -> bool:
-    return not colliding_pairs(world, arm, qpos, ignore_geoms)
+def collision_free(world, arm: str, qpos: np.ndarray, ignore_geoms: set[int] | None = None,
+                   gripper: float | None = None) -> bool:
+    return not colliding_pairs(world, arm, qpos, ignore_geoms, gripper=gripper)

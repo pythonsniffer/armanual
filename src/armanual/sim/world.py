@@ -61,6 +61,7 @@ class World:
         self._renderers: dict[tuple[int, int], mujoco.Renderer] = {}
         self._scratch: mujoco.MjData | None = None
         self._arm_geoms: dict[str, set[int]] = {}
+        self._movable_geoms: set[int] | None = None
         self.arms: dict[str, ArmHandle] = {a.name: self._arm_handle(a.name) for a in scene.arms}
         self.reset()
 
@@ -116,6 +117,44 @@ class World:
                 self.model.body_geomadr[body] + self.model.body_geomnum[body],
             )
         )
+
+    def movable_geom_ids(self) -> set[int]:
+        """Geoms of every free-floating object (tableware, liquid particles, the drawer box).
+
+        A planner asking "can this arm get its tool to that point?" must not count the object it
+        is reaching *for* as an obstacle, so these are excluded from feasibility screening. The
+        executor still screens against them at grasp time, where contact is real.
+        """
+        if self._movable_geoms is None:
+            geoms: set[int] = set()
+            for body in range(self.model.nbody):
+                joint_count = self.model.body_jntnum[body]
+                joint_start = self.model.body_jntadr[body]
+                kinds = {
+                    int(self.model.jnt_type[j])
+                    for j in range(joint_start, joint_start + joint_count)
+                }
+                if int(mujoco.mjtJoint.mjJNT_FREE) in kinds or int(
+                    mujoco.mjtJoint.mjJNT_SLIDE
+                ) in kinds:
+                    start = self.model.body_geomadr[body]
+                    geoms.update(range(start, start + self.model.body_geomnum[body]))
+            self._movable_geoms = geoms
+        return self._movable_geoms
+
+    def geoms_near(self, point, radius: float = 0.08) -> set[int]:
+        """Movable geoms whose body sits within ``radius`` of a world point.
+
+        Used to tell the collision screen which contacts are expected: when the gripper closes on
+        an object, touching *that* object is the goal, not a collision.
+        """
+        point = np.asarray(point, dtype=float)[:3]
+        out: set[int] = set()
+        for geom in self.movable_geom_ids():
+            body = int(self.model.geom_bodyid[geom])
+            if float(np.linalg.norm(self.data.xpos[body] - point)) < radius:
+                out.add(geom)
+        return out
 
     def scratch_data(self) -> mujoco.MjData:
         """A reusable spare ``MjData`` for kinematics/dynamics queries off the main state."""

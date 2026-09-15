@@ -77,7 +77,7 @@ def grasp_for(obj: ObjectSpec, obj_pos: np.ndarray, base_xy: np.ndarray, obj_yaw
         rim = obj_pos - radial * sx
         rim[2] = obj_pos[2] + sz * 1.7
         return GraspSpec(pos=rim, jaw=radial, width=0.009, close_to=0.0, lift=0.075,
-                         approach_height=0.075, seat=0.003, label="plate-rim")
+                         approach_height=0.075, seat=0.0, label="plate-rim")
 
     if obj.category in ("cup", "bottle"):
         # Span the whole body: the jaws close across the diameter, which is both the sturdiest
@@ -133,3 +133,58 @@ def drawer_handle_grasp(handle_pos: np.ndarray) -> GraspSpec:
     return GraspSpec(pos=np.asarray(handle_pos, dtype=float), jaw=np.array([0.0, 1.0, 0.0]),
                      width=0.015, close_to=0.0, lift=0.0, approach_height=0.08, seat=0.0,
                      label="drawer-handle")
+
+
+def grasp_from_detection(detection, base_xy, *, obj_yaw: float | None = None) -> GraspSpec:
+    """Build a grasp from a *perceived* object rather than a simulator object.
+
+    This is what the closed-loop executor uses: the only inputs are the detector's measured
+    footprint radius, top height, category and position, so the controller grasps what the camera
+    reports. A pose error in perception therefore shows up as a grasp error, exactly as it would
+    on hardware — no privileged pose is available to paper over it.
+    """
+    position = np.asarray(detection.position, dtype=float)
+    radial = _toward(base_xy, position)
+    radius = float(detection.radius)
+    top = float(detection.height)
+
+    if detection.category == "plate":
+        # The detector's footprint radius runs a few millimetres wide (it measures the outer edge
+        # of the blob), so aim slightly inside it, and pinch just below the top of the rim.
+        # The blob's 95th-percentile height overshoots the rim by a few millimetres, so aim at a
+        # fraction of it rather than just below it: the jaws must close *on* the rim wall, and a
+        # centimetre high is a centimetre of air.
+        rim = position - radial * radius * 0.95
+        rim[2] = max(0.006, top * 0.70)
+        # seat=0: pressing down "to make sure" is exactly wrong on a rim — two millimetres lower
+        # and the jaws pass under the wall and shove the plate instead of pinching it. Measured:
+        # 5/10 grasps with a 2 mm seat, 10/10 without.
+        return GraspSpec(pos=rim, jaw=radial, width=0.009, lift=0.075, approach_height=0.070,
+                         seat=0.0, label="plate-rim")
+    if detection.category == "bottle":
+        neck = position.copy()
+        neck[2] = top - 0.018
+        return GraspSpec(pos=neck, jaw=radial, width=max(0.020, radius), lift=0.11,
+                         approach_height=0.075, seat=0.0, label="bottle-neck")
+    if detection.category == "cup":
+        body = position.copy()
+        body[2] = top * 0.75
+        return GraspSpec(pos=body, jaw=radial, width=min(2 * radius, 0.075), lift=0.10,
+                         approach_height=0.085, seat=0.0, label="cup-span")
+    if detection.category == "utensil":
+        # The detector sees a sliver; its major axis gives the handle direction.
+        yaw = obj_yaw if obj_yaw is not None else 0.0
+        axis = np.array([np.cos(yaw), np.sin(yaw), 0.0])
+        handle = position - axis * radius * 0.75
+        handle[2] = max(0.006, top - 0.004)
+        return GraspSpec(pos=handle, jaw=np.cross(UP, axis), width=0.013, lift=0.07,
+                         approach_height=0.065, seat=0.0, label="utensil-handle")
+    if detection.category == "tray":
+        pos = position.copy()
+        pos[2] = top + 0.008
+        return GraspSpec(pos=pos, jaw=np.array([0.0, 1.0, 0.0]), width=0.014, lift=0.05,
+                         approach_height=0.07, label="tray")
+    edge = position - radial * radius * 0.6
+    edge[2] = max(0.004, top)
+    return GraspSpec(pos=edge, jaw=radial, width=max(0.006, top), lift=0.05,
+                     approach_height=0.05, seat=0.002, label="flat-edge")
