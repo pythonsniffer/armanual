@@ -62,7 +62,7 @@ POLICY_PRESETS = {
             # Our cameras record at 224x224, so padding up to the pretrained 512x512 adds no
             # information and costs ~4x the vision compute per sample. 256 keeps the patch grid
             # meaningful and roughly quadruples training throughput on a laptop GPU.
-            "--policy.resize_imgs_with_padding=[256,256]",
+            "--policy.resize_imgs_with_padding=[{image_size},{image_size}]",
             "--policy.push_to_hub=false",
         ],
     },
@@ -83,6 +83,10 @@ def main() -> None:
     parser.add_argument("--job-name", default=None)
     parser.add_argument("--wandb", action="store_true")
     parser.add_argument("--resume", action="store_true")
+    parser.add_argument("--image-size", type=int, default=256,
+                        help="what the policy resizes camera frames to. Smaller means fewer "
+                             "vision tokens: faster steps and less memory, at some spatial "
+                             "precision. 224 and 192 both train comfortably in 8 GB")
     parser.add_argument("--num-workers", type=int, default=2, dest="num_workers",
                         help="dataloader workers; each one decodes video, so keep it modest on a "
                              "memory-constrained machine")
@@ -121,7 +125,10 @@ def main() -> None:
         # size is the supported way to increase the effective batch here.
         command.append("--optimizer.type=adamw")
         command.append(f"--optimizer.grad_accumulation_steps={grad_accum}")
-    command.extend(preset["extra"])
+    command.extend(
+        flag.format(image_size=args.image_size) if "{image_size}" in flag else flag
+        for flag in preset["extra"]
+    )
     if args.resume:
         command.append("--resume=true")
 
