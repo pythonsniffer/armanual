@@ -89,6 +89,28 @@ class LeRobotBackend:
         self.name = f"torch:{self.device.type}"
         self.action_dim = ACTION_DIM
         self.stats = InferenceStats()
+        self.image_keys = self._image_key_map()
+
+    def _image_key_map(self) -> dict[str, str]:
+        """Map our camera names to whatever the trained policy calls them.
+
+        SmolVLA's pretrained config names its cameras ``camera1..3`` and training renames our
+        keys to match. Inference has to apply the *same* rename or the policy receives an
+        observation with no images at all — which does not raise, it just produces nonsense.
+        """
+        expected = [
+            key for key in getattr(self.policy.config, "input_features", {})
+            if key.startswith("observation.images.")
+        ]
+        ours = [key for key, _camera in CAMERAS]
+        if not expected or set(expected) == set(ours):
+            return {key: key for key in ours}
+        if len(expected) != len(ours):
+            raise RuntimeError(
+                f"policy expects {len(expected)} cameras {expected}, dataset provides "
+                f"{len(ours)} {ours}"
+            )
+        return dict(zip(ours, sorted(expected)))
 
     @staticmethod
     def _load(checkpoint: str, get_policy_class):
@@ -112,7 +134,7 @@ class LeRobotBackend:
         for key, _camera in CAMERAS:
             image = torch.from_numpy(images[key]).to(self.device)
             image = image.permute(2, 0, 1).unsqueeze(0).to(torch.float32) / 255.0
-            batch[key] = image
+            batch[self.image_keys[key]] = image
         batch["observation.state"] = torch.from_numpy(np.asarray(state, dtype=np.float32)).unsqueeze(0).to(self.device)
         batch["task"] = [task]
 
