@@ -93,7 +93,7 @@ processes and why evaluation wall-clock is dominated by rendering rather than ph
 
 | Gap | Status |
 | --- | --- |
-| G1 Speechmatics API details unverified | open — architecture ready, client not written |
+| G1 Speechmatics API details unverified | closed — API verified 2026-09-16, client implemented in `modality/speech.py` |
 | G2 Intel hackathon stack unverified | partially closed — OpenVINO 2026.3 installed and working |
 | G3 No dual-SO-101 dinner-table environment existed | closed — built |
 | G4 No LeRobot env for this task | closed by design — LeRobot format for data/training, our own harness for closed-loop eval |
