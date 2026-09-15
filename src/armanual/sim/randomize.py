@@ -104,9 +104,9 @@ _NOMINAL: tuple[dict, ...] = (
          size=(0.037, 0.037, 0.004), color="white", mass=0.055, size_label="small"),
     dict(name="cup_target", category="cup", pos=(0.11, -0.03, 0.0),
          size=(0.027, 0.027, 0.032), color="blue", mass=0.055, size_label="medium"),
-    dict(name="cup_distract", category="cup", pos=(-0.19, -0.02, 0.0),
+    dict(name="cup_distract", category="cup", pos=(-0.12, -0.03, 0.0),
          size=(0.026, 0.026, 0.030), color="navy", mass=0.050, size_label="medium"),
-    dict(name="bottle_water", category="bottle", pos=(-0.33, -0.15, 0.0),
+    dict(name="bottle_water", category="bottle", pos=(-0.35, -0.19, 0.0),
          size=(0.029, 0.029, 0.052), color="green", mass=0.16, size_label="large"),
     dict(name="tray_1", category="tray", pos=(0.30, -0.17, 0.008),
          size=(0.065, 0.048, 0.005), color="brown", mass=0.13, size_label="large"),
@@ -114,11 +114,11 @@ _NOMINAL: tuple[dict, ...] = (
 
 #: Utensils start inside the drawer — retrieving them is the multi-step dependency.
 _DRAWER_ITEMS: tuple[dict, ...] = (
-    dict(name="spoon_1", category="spoon", pos=(-0.030, 0.0, 0.020),
+    dict(name="spoon_1", category="spoon", pos=(-0.048, -0.005, 0.022), yaw0=math.pi / 2,
          size=(0.026, 0.011, 0.0028), color="silver", mass=0.022, size_label="medium"),
-    dict(name="fork_1", category="fork", pos=(0.010, 0.0, 0.020),
+    dict(name="fork_1", category="fork", pos=(0.002, -0.005, 0.022), yaw0=math.pi / 2,
          size=(0.026, 0.010, 0.0028), color="silver", mass=0.022, size_label="medium"),
-    dict(name="knife_1", category="knife", pos=(0.048, 0.0, 0.020),
+    dict(name="knife_1", category="knife", pos=(0.050, -0.005, 0.022), yaw0=math.pi / 2,
          size=(0.030, 0.008, 0.0030), color="silver", mass=0.026, size_label="medium"),
 )
 
@@ -151,6 +151,35 @@ def _clamp_reachable(pos: np.ndarray, arms) -> np.ndarray:
     direction = delta / (dist + 1e-9)
     out = pos.copy()
     out[:2] = base + direction * target
+    return out
+
+
+#: Half-extents of the drawer cabinet, from the MJCF in :mod:`armanual.sim.builder`, plus the
+#: band the drawer sweeps when it opens. Table objects are kept out of it: an object spawned
+#: inside the cabinet is jammed geometry, which would show up as a mysterious grasp failure.
+DRAWER_KEEPOUT_HALF = (0.095, 0.085)
+DRAWER_SWEEP = 0.14  # metres the open drawer + its handle occupy toward -y
+
+
+def _avoid_drawer(objects: list[ObjectSpec], drawer_pos, present: bool) -> list[ObjectSpec]:
+    """Push any table object out of the drawer cabinet and its opening path."""
+    if not present:
+        return objects
+    hx, hy = DRAWER_KEEPOUT_HALF
+    y_min = drawer_pos[1] - hy - DRAWER_SWEEP
+    y_max = drawer_pos[1] + hy
+    out = []
+    for obj in objects:
+        x, y = obj.pos[0], obj.pos[1]
+        radius = max(obj.size[0], obj.size[1])
+        inside_x = abs(x - drawer_pos[0]) < hx + radius
+        inside_y = y_min - radius < y < y_max + radius
+        if inside_x and inside_y:
+            # Push out sideways (the cheapest direction that keeps the object on the table).
+            sign = 1.0 if x >= drawer_pos[0] else -1.0
+            x = drawer_pos[0] + sign * (hx + radius + 0.015)
+            obj = _with_xy(obj, (x, y))
+        out.append(obj)
     return out
 
 
@@ -210,9 +239,13 @@ def _make_object(
 
     mass = entry["mass"] * (rng.uniform(*cfg.mass_range) if cfg.mass else 1.0)
     fr = 1.0 * (rng.uniform(*cfg.friction_range) if cfg.friction else 1.0)
-    yaw = float(rng.uniform(-math.pi, math.pi)) if cfg.placement else 0.0
+    yaw0 = float(entry.get("yaw0", 0.0))
+    yaw = yaw0 + (float(rng.uniform(-math.pi, math.pi)) if cfg.placement else 0.0)
     if entry["category"] in ("spoon", "fork", "knife"):
-        yaw = float(rng.uniform(-0.25, 0.25)) if cfg.placement else 0.0
+        # Utensils keep their nominal orientation (in the drawer: pointing away from the user);
+        # only a small jitter, because a utensil lying across its neighbours is a scene bug,
+        # not a robustness test.
+        yaw = yaw0 + (float(rng.uniform(-0.18, 0.18)) if cfg.placement else 0.0)
 
     return ObjectSpec(
         name=entry["name"],
@@ -266,7 +299,9 @@ def sample_scene(
         chosen = rng.choice(len(_DISTRACTORS), size=n, replace=False)
         objects += [_make_object(_DISTRACTORS[i], rng, cfg, arms, in_drawer=False) for i in chosen]
 
+    objects = _avoid_drawer(objects, drawer_pos, drawer)
     objects = _separate(objects)
+    objects = _avoid_drawer(objects, drawer_pos, drawer)
 
     lighting = LightingSpec()
     if cfg.lighting:

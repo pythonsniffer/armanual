@@ -78,3 +78,67 @@ WARNING Tue Sep 15 16:26:10 2026: Attach conflict when attaching 'right' to 'din
 iterations: parent has 20, child has 10, keeping parent value
 ls_iterations: parent has 30, child has 20, keeping parent value
 
+WARNING Tue Sep 15 16:26:46 2026: Attach conflict when attaching 'left' to 'dinner_table', policy is 'warning'
+iterations: parent has 20, child has 10, keeping parent value
+ls_iterations: parent has 30, child has 20, keeping parent value
+
+WARNING Tue Sep 15 16:26:46 2026: Attach conflict when attaching 'right' to 'dinner_table', policy is 'warning'
+iterations: parent has 20, child has 10, keeping parent value
+ls_iterations: parent has 30, child has 20, keeping parent value
+
+WARNING Tue Sep 15 16:30:01 2026: Attach conflict when attaching 'left' to 'dinner_table', policy is 'warning'
+iterations: parent has 20, child has 10, keeping parent value
+ls_iterations: parent has 30, child has 20, keeping parent value
+
+WARNING Tue Sep 15 16:30:01 2026: Attach conflict when attaching 'right' to 'dinner_table', policy is 'warning'
+iterations: parent has 20, child has 10, keeping parent value
+ls_iterations: parent has 30, child has 20, keeping parent value
+
+WARNING Tue Sep 15 16:30:40 2026: Attach conflict when attaching 'left' to 'dinner_table', policy is 'warning'
+iterations: parent has 20, child has 10, keeping parent value
+ls_iterations: parent has 30, child has 20, keeping parent value
+
+WARNING Tue Sep 15 16:30:40 2026: Attach conflict when attaching 'right' to 'dinner_table', policy is 'warning'
+iterations: parent has 20, child has 10, keeping parent value
+ls_iterations: parent has 30, child has 20, keeping parent value
+
+WARNING Tue Sep 15 16:30:41 2026: Attach conflict when attaching 'left' to 'dinner_table', policy is 'warning'
+iterations: parent has 20, child has 10, keeping parent value
+ls_iterations: parent has 30, child has 20, keeping parent value
+
+WARNING Tue Sep 15 16:30:41 2026: Attach conflict when attaching 'right' to 'dinner_table', policy is 'warning'
+iterations: parent has 20, child has 10, keeping parent value
+ls_iterations: parent has 30, child has 20, keeping parent value
+
+WARNING Tue Sep 15 16:30:43 2026: Attach conflict when attaching 'left' to 'dinner_table', policy is 'warning'
+iterations: parent has 20, child has 10, keeping parent value
+ls_iterations: parent has 30, child has 20, keeping parent value
+
+WARNING Tue Sep 15 16:30:43 2026: Attach conflict when attaching 'right' to 'dinner_table', policy is 'warning'
+iterations: parent has 20, child has 10, keeping parent value
+ls_iterations: parent has 30, child has 20, keeping parent value
+
+WARNING Tue Sep 15 16:30:44 2026: Attach conflict when attaching 'left' to 'dinner_table', policy is 'warning'
+iterations: parent has 20, child has 10, keeping parent value
+ls_iterations: parent has 30, child has 20, keeping parent value
+
+WARNING Tue Sep 15 16:30:44 2026: Attach conflict when attaching 'right' to 'dinner_table', policy is 'warning'
+iterations: parent has 20, child has 10, keeping parent value
+ls_iterations: parent has 30, child has 20, keeping parent value
+
+WARNING Tue Sep 15 16:30:45 2026: Attach conflict when attaching 'left' to 'dinner_table', policy is 'warning'
+iterations: parent has 20, child has 10, keeping parent value
+ls_iterations: parent has 30, child has 20, keeping parent value
+
+WARNING Tue Sep 15 16:30:45 2026: Attach conflict when attaching 'right' to 'dinner_table', policy is 'warning'
+iterations: parent has 20, child has 10, keeping parent value
+ls_iterations: parent has 30, child has 20, keeping parent value
+
+WARNING Tue Sep 15 16:30:46 2026: Attach conflict when attaching 'left' to 'dinner_table', policy is 'warning'
+iterations: parent has 20, child has 10, keeping parent value
+ls_iterations: parent has 30, child has 20, keeping parent value
+
+WARNING Tue Sep 15 16:30:46 2026: Attach conflict when attaching 'right' to 'dinner_table', policy is 'warning'
+iterations: parent has 20, child has 10, keeping parent value
+ls_iterations: parent has 30, child has 20, keeping parent value
+

@@ -285,6 +285,10 @@ def build_model(scene: SceneSpec) -> tuple[mujoco.MjModel, mujoco.MjSpec]:
         )
         child = mujoco.MjSpec.from_file(str(SO101_XML))
         child.modelname = arm.name
+        # Match the scene's solver settings so attaching does not raise a conflict warning; the
+        # scene deliberately uses more iterations than the stand-alone arm model for stable grasps.
+        child.option.iterations = root.option.iterations
+        child.option.ls_iterations = root.option.ls_iterations
         root.attach(child, prefix=f"{arm.name}/", frame=mount.add_frame())
 
     # The arm MJCF carries its own (lower) solver iteration counts; the scene's higher values win
