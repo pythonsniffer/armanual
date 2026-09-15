@@ -104,7 +104,33 @@ Three columns are reported on the same tasks and seeds: analytical, policy alone
 the analytical fallback. The third is what a deployed system would do; reporting all three keeps
 the policy from being credited with the fallback's successes.
 
-*Pending training.*
+### Policy-only progress during training
+
+```bash
+python scripts/eval_policy_progress.py --checkpoint <ckpt> --seeds 2 --seconds 12
+```
+
+| Checkpoint | Loss | Policy-only subgoal success | Drawer | Plate | Cup |
+| --- | --- | --- | --- | --- | --- |
+| 4,000 steps | 0.040 | **0.17** (1/6) | 0.50 | 0.00 | 0.00 |
+
+The drawer result is the interesting one: opening a drawer is a multi-second, contact-rich
+manipulation, and the policy performs it unaided from roughly a dozen demonstrations. Placement
+lags, which is consistent with the same 87 demonstrations being spread across many
+object × destination combinations.
+
+### Inference latency in the loop (measured, CPU)
+
+| Statistic | Value |
+| --- | --- |
+| p50 per control tick | **3.5 ms** |
+| p95 | 4.3 ms |
+| max (the tick where the model actually runs) | **1065 ms** |
+| mean across ticks | 25 ms |
+
+SmolVLA predicts a 50-step action chunk, so the network runs about once every 50 control ticks and
+the remaining ticks pop a queued action. The 1.1 s spike on CPU is the single strongest argument
+for the OpenVINO work: at 20 Hz control, that tick blows the budget by 20×.
 
 ## 7. Intel / OpenVINO
 
