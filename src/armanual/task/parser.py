@@ -260,6 +260,29 @@ def parse_clause(clause: str, previous_target: Referent | None = None) -> Action
     return ActionSpec(verb="place", target=target, destination=destination, arm_hint=arm_hint)
 
 
+def _has_verb(clause: str) -> bool:
+    return any(re.search(pattern, clause) for pattern, _verb in VERB_PATTERNS)
+
+
+def _merge_verbless(clauses: list[str]) -> list[str]:
+    """Re-join fragments that 'and' split in the middle of a phrase.
+
+    "put the cup above and right of the plate" is one instruction, not two: the second fragment
+    has no verb, so it belongs to the first clause. Splitting it off would drop half the
+    destination and leave a spurious parse warning.
+    """
+    merged: list[str] = []
+    for clause in clauses:
+        clause = clause.strip()
+        if not clause:
+            continue
+        if merged and not _has_verb(clause):
+            merged[-1] = f"{merged[-1]} and {clause}"
+        else:
+            merged.append(clause)
+    return merged
+
+
 def parse_instruction(text: str, modality: str = "text", confidence: float = 1.0) -> TaskRequest:
     """Parse a whole instruction, which may chain several clauses with 'and' or 'then'."""
     request = TaskRequest(text=text, modality=modality, confidence=confidence)
@@ -275,7 +298,7 @@ def parse_instruction(text: str, modality: str = "text", confidence: float = 1.0
             break
 
     previous_target: Referent | None = None
-    for clause in _SPLIT.split(normalized):
+    for clause in _merge_verbless(_SPLIT.split(normalized)):
         clause = clause.strip()
         if not clause:
             continue

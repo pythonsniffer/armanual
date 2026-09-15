@@ -163,9 +163,11 @@ class ClosedLoopExecutor:
                     return Status.FAILURE, "object no longer visible", "perception"
                 grasp = grasp_from_detection(detection, self.world.base_pos(step.arm)[:2],
                                              obj_yaw=_detection_yaw(detection))
+                centre_offset = grasp.pos[:2] - detection.position[:2]
                 result = self.scheduler.run(
                     {step.arm: _pick_then_place(self.world, step.arm, grasp, step.target_xy,
-                                                dt=self.dt, refiner=self.refiner)},
+                                                dt=self.dt, refiner=self.refiner,
+                                                centre_offset=centre_offset)},
                     max_seconds=self.step_budget * 1.6,
                 )
             elif step.verb == "handoff":
@@ -333,10 +335,19 @@ class ClosedLoopExecutor:
         return record
 
 
-def _pick_then_place(world, arm: str, grasp, target_xy, *, dt: float = 0.05, refiner=None):
-    """Composite skill: grasp a detected object, then place it at a table position."""
+def _pick_then_place(world, arm: str, grasp, target_xy, *, dt: float = 0.05, refiner=None,
+                     centre_offset=(0.0, 0.0)):
+    """Composite skill: grasp a detected object, then place it at a table position.
+
+    ``centre_offset`` is the vector from the object's centre to the point the jaws hold. A plate
+    is held by its rim, five centimetres off centre, so placing "the grasped feature" at the
+    target would leave the plate itself half a setting away — which is exactly what the placement
+    error metric was reporting before this was accounted for.
+    """
     yield from P.pick_detected(world, arm, grasp, dt=dt, refiner=refiner)
-    yield from P.place_held(world, arm, target_xy, height=0.045, dt=dt, jaw=grasp.jaw,
+    target = (float(target_xy[0]) + float(centre_offset[0]),
+              float(target_xy[1]) + float(centre_offset[1]))
+    yield from P.place_held(world, arm, target, height=0.045, dt=dt, jaw=grasp.jaw,
                             tool_offset=pinch_offset(grasp.width))
 
 
@@ -346,15 +357,28 @@ def _detection_yaw(detection: Detection) -> float:
 
 
 def _annotate_pick_points(plan: Plan, observation: SceneObservation) -> None:
-    """Attach the current pick position to each step, matching by the planner's object name."""
+    """Refresh each step's pick point against the latest observation.
+
+    The planner already recorded *where* it intends to pick from. This re-snaps that point to the
+    nearest current detection, so a plan made one observation ago still aims at the object where
+    it is now rather than where it was — and an object that has vanished is detected as missing
+    here instead of halfway through a reach.
+    """
     for step in plan.steps:
-        match = None
+        if step.pick_xy is None:
+            step.pick_xy = step.target_xy
+        if step.pick_xy is None:
+            continue
+        anchor = np.asarray(step.pick_xy, dtype=float)
+        best, best_distance = None, 0.06
         for detection in observation.detections:
-            label = detection.name or f"track{detection.track_id}"
-            if label == step.object_name:
-                match = detection
-                break
-        step.pick_xy = tuple(match.position[:2]) if match is not None else step.target_xy
+            if detection.category in ("furniture", "unknown"):
+                continue
+            distance = float(np.linalg.norm(detection.position[:2] - anchor))
+            if distance < best_distance:
+                best, best_distance = detection, distance
+        if best is not None:
+            step.pick_xy = (float(best.position[0]), float(best.position[1]))
         step.target_source = step.pick_xy
 
 

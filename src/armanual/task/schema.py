@@ -136,6 +136,12 @@ class GroundedTarget:
     color: str = ""
     score: float = 0.0
     alternatives: list[tuple[str, float]] = field(default_factory=list)
+    #: Runner-up interpretations as (description, score, position, category). The planner falls
+    #: back to these when the best match turns out to be unreachable — an unreachable winner
+    #: usually means the detector produced a phantom, and the second choice is the real object.
+    candidates: list[tuple[str, float, tuple[float, float, float], str]] = field(
+        default_factory=list
+    )
 
     @property
     def ambiguous(self) -> bool:

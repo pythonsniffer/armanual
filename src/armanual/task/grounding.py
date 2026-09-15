@@ -195,6 +195,10 @@ class Grounder:
             color=best.color_name,
             score=score,
             alternatives=[(d.describe(), s) for d, s in ranked[1:4]],
+            candidates=[
+                (d.describe(), float(s), tuple(float(v) for v in d.position), d.category)
+                for d, s in ranked[:4]
+            ],
         )
 
     def ground_destination(

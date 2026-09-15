@@ -172,6 +172,7 @@ class Planner:
     def _pick_place_steps(self, object_name: str, pick_xy, place_xy, *, role: str = "",
                           hint: str | None = None, requires: tuple[str, ...] = ()) -> list[Step]:
         arm, receiver, note = self.assign_arm(pick_xy, place_xy, hint=hint)
+        pick_point = (float(pick_xy[0]), float(pick_xy[1]))
         if arm is None:
             return []
         if receiver is None:
@@ -179,6 +180,7 @@ class Planner:
                 Step(
                     verb="pick_place",
                     object_name=object_name,
+                    pick_xy=pick_point,
                     target_xy=(float(place_xy[0]), float(place_xy[1])),
                     arm=arm,
                     role=role,
@@ -192,6 +194,7 @@ class Planner:
         handoff = Step(
             verb="handoff",
             object_name=object_name,
+            pick_xy=pick_point,
             giver=arm,
             receiver=receiver,
             target_xy=meeting,
@@ -228,13 +231,12 @@ class Planner:
                     continue
                 # A bare "pick up X" parks the object in the near workspace of whichever arm
                 # takes it, rather than inventing a destination the user did not ask for.
-                pick_xy = action.target.position[:2]
-                arm_cost = {a: self.reach_cost(a, pick_xy) for a in self.world.arms}
-                feasible = [a for a, c in arm_cost.items() if c.feasible]
-                if not feasible:
+                pick_xy, arm, note = self._reachable_interpretation(action.target)
+                if arm is None:
                     plan.unplaceable.append(action.target.name or action.target.referent.describe())
                     continue
-                arm = min(feasible, key=lambda a: arm_cost[a].cost)
+                if note:
+                    plan.notes.append(note)
                 hold_xy = (self.world.base_pos(arm)[0], self.world.base_pos(arm)[1] + 0.20)
                 plan.steps.extend(
                     self._prerequisite_steps(action.target, observation, plan)
@@ -250,10 +252,13 @@ class Planner:
                 if destination is None and plan.setting is not None:
                     role = _role_for_category(action.target.category)
                     destination = plan.setting.target_for(role) or self.setting_origin
+                pick_xy, reachable_arm, note = self._reachable_interpretation(action.target)
+                if note:
+                    plan.notes.append(note)
                 steps = self._prerequisite_steps(action.target, observation, plan)
                 steps += self._pick_place_steps(
                     action.target.name or "",
-                    action.target.position[:2],
+                    pick_xy,
                     destination,
                     hint=action.spec.arm_hint,
                     role=_role_for_category(action.target.category),
@@ -267,6 +272,32 @@ class Planner:
             else:
                 plan.notes.append(f"unsupported verb {verb!r}")
         return plan
+
+    def _reachable_interpretation(self, target):
+        """Pick the best-scoring interpretation of a referent that an arm can actually reach.
+
+        The top-scoring detection is used whenever it is reachable. When it is not — which in
+        practice means the detector merged or invented a blob somewhere off the table — the
+        runner-up interpretations are tried in score order, and the substitution is recorded in
+        the plan's notes so the evaluation can see that it happened.
+        """
+        options = target.candidates or [
+            (target.referent.describe(), target.score,
+             tuple(float(v) for v in target.position), target.category)
+        ]
+        for index, (description, _score, position, _category) in enumerate(options):
+            costs = {a: self.reach_cost(a, position[:2]) for a in self.world.arms}
+            feasible = [a for a, c in costs.items() if c.feasible]
+            if feasible:
+                arm = min(feasible, key=lambda a: costs[a].cost)
+                note = (
+                    ""
+                    if index == 0
+                    else f"best match for {target.referent.describe()!r} was out of reach; "
+                         f"used next-best interpretation ({description})"
+                )
+                return np.asarray(position[:2]), arm, note
+        return np.asarray(options[0][2][:2]), None, ""
 
     # ------------------------------------------------------------------------- sub-planners
     def _drawer_step(self, observation, *, force: bool = False) -> Step:

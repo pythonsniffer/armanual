@@ -150,7 +150,9 @@ def _classify(radius: float, height: float, elongation: float, color: str) -> st
     if height > 0.075:
         return "bottle"
     if height > 0.022 and radius < 0.045:
-        return "cup"
+        # A long thin ridge is not a cup, whatever its height: that shape is a handle or a rim
+        # seen edge-on, and letting it pass as a cup puts a phantom target on the table.
+        return "utensil" if elongation > 3.5 and height < 0.040 else "cup"
     if height <= 0.022 and elongation > 2.2 and radius < 0.055:
         return "utensil"
     if height <= 0.026 and radius >= 0.055:
