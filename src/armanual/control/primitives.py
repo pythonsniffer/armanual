@@ -63,9 +63,18 @@ def goto_pose(
     dt: float = 0.05,
     tolerance: float = 0.012,
     label: str = "pose",
+    tool_offset: np.ndarray | None = None,
+    payload: float = 0.0,
+    ignore_geoms: set[int] | None = None,
 ) -> Skill:
-    """Solve IK for ``pos`` and drive the arm there. Raises if the pose is unreachable."""
-    solution = solve_reach(world, arm, pos, jaw=jaw)
+    """Solve IK for ``pos`` and drive the arm there. Raises if the pose is unreachable.
+
+    Pass ``tool_offset`` (from :attr:`~armanual.control.grasp.GraspSpec.tool_offset`) when ``pos``
+    is where the *object* should sit between the jaws rather than where the tool site should go;
+    pass ``ignore_geoms`` for geometry the arm is allowed to touch, such as the object it holds.
+    """
+    solution = solve_reach(world, arm, pos, jaw=jaw, payload=payload, tool_offset=tool_offset,
+                           ignore_geoms=ignore_geoms)
     if not solution.ik.ok(pos_tol=tolerance, rot_tol=0.6):
         raise SkillFailure(
             f"{arm}: {label} target {np.round(pos, 3).tolist()} unreachable "
@@ -73,6 +82,41 @@ def goto_pose(
             kind="reachability",
         )
     yield from goto_qpos(world, arm, solution.qpos, duration=duration, dt=dt)
+
+
+def goto_pose_linear(
+    world,
+    arm: str,
+    pos: np.ndarray,
+    *,
+    jaw: np.ndarray | None = None,
+    duration: float = 1.0,
+    dt: float = 0.05,
+    steps: int = 6,
+    tolerance: float = 0.012,
+    label: str = "linear",
+    tool_offset: np.ndarray | None = None,
+    ignore_geoms: set[int] | None = None,
+) -> Skill:
+    """Move to ``pos`` along a straight line in space, not a straight line in joint space.
+
+    Interpolating joint angles between two poses bows the path sideways, which is how a descent
+    onto a cup ends with the jaw pressed into its wall instead of around it. Solving IK at
+    intermediate Cartesian waypoints keeps the tool on the line the grasp assumes.
+    """
+    start = world.tcp_pos(arm)
+    if tool_offset is not None:
+        # Track the *pinch point* rather than the site, so the interpolation is a straight line
+        # for the thing being grasped.
+        start = start + world.tcp_mat(arm) @ np.asarray(tool_offset)
+    target = np.asarray(pos, dtype=float)
+    for i in range(1, steps + 1):
+        waypoint = start + (target - start) * (i / steps)
+        yield from goto_pose(
+            world, arm, waypoint, jaw=jaw, duration=duration / steps, dt=dt,
+            tolerance=tolerance if i == steps else max(tolerance, 0.02),
+            label=f"{label}[{i}/{steps}]", tool_offset=tool_offset, ignore_geoms=ignore_geoms,
+        )
 
 
 def set_gripper(world, arm: str, opening: float, settle: float = 0.35, dt: float = 0.05) -> Skill:
@@ -100,17 +144,26 @@ def retreat(world, arm: str, height: float = 0.12, duration: float = 0.8, dt: fl
 
 
 # ------------------------------------------------------------------------------ pick and place
-def grasp_at(world, arm: str, grasp: GraspSpec, *, dt: float = 0.05) -> Skill:
-    """Execute a grasp: pre-open, approach from above, descend, close, lift."""
+def grasp_at(world, arm: str, grasp: GraspSpec, *, dt: float = 0.05,
+             ignore_geoms: set[int] | None = None) -> Skill:
+    """Execute a grasp: pre-open, approach from above, descend, close, lift.
+
+    ``ignore_geoms`` should hold the target object's geoms: the jaws are *meant* to touch it, so
+    the collision screen must not treat that contact as a reason to reject the pose.
+    """
+    offset = grasp.tool_offset
     yield from set_gripper(world, arm, grasp.pre_open, settle=0.15, dt=dt)
     yield from goto_pose(world, arm, grasp.approach_pos(), jaw=grasp.jaw, duration=1.2, dt=dt,
-                         tolerance=0.02, label="pre-grasp")
-    yield from goto_pose(world, arm, grasp.pos - UP * grasp.seat, jaw=grasp.jaw, duration=0.9,
-                         dt=dt, label="grasp")
+                         tolerance=0.02, label=f"pre-grasp({grasp.label})", tool_offset=offset,
+                         ignore_geoms=ignore_geoms)
+    yield from goto_pose_linear(world, arm, grasp.pos - UP * grasp.seat, jaw=grasp.jaw,
+                                duration=0.9, dt=dt, steps=5, label=f"grasp({grasp.label})",
+                                tool_offset=offset, ignore_geoms=ignore_geoms)
     yield from set_gripper(world, arm, grasp.close_to, settle=0.45, dt=dt)
-    lift_to = world.tcp_pos(arm) + UP * grasp.lift
-    yield from goto_pose(world, arm, lift_to, jaw=grasp.jaw, duration=0.9, dt=dt, tolerance=0.03,
-                         label="lift")
+    lift_to = grasp.pos + UP * grasp.lift
+    yield from goto_pose_linear(world, arm, lift_to, jaw=grasp.jaw, duration=0.9, dt=dt, steps=4,
+                                tolerance=0.03, label="lift", tool_offset=offset,
+                                ignore_geoms=ignore_geoms)
 
 
 def pick(world, arm: str, obj_name: str, *, dt: float = 0.05, verify: bool = True) -> Skill:
@@ -119,7 +172,7 @@ def pick(world, arm: str, obj_name: str, *, dt: float = 0.05, verify: bool = Tru
     start_z = float(world.object_pos(obj_name)[2])
     grasp = grasp_for(obj, world.object_pos(obj_name), world.base_pos(arm)[:2],
                       obj_yaw=_object_yaw(world, obj_name))
-    yield from grasp_at(world, arm, grasp, dt=dt)
+    yield from grasp_at(world, arm, grasp, dt=dt, ignore_geoms=world.object_geom_ids(obj_name))
     if verify:
         lifted = float(world.object_pos(obj_name)[2]) - start_z
         if lifted < grasp.lift * 0.45:
@@ -160,23 +213,31 @@ def open_drawer(world, arm: str, *, distance: float | None = None, dt: float = 0
     if not spec.present:
         raise SkillFailure("scene has no drawer", kind="planning")
     handle = world.site_pos("drawer_handle")
-    jaw = np.array([1.0, 0.0, 0.0])  # jaws close across the handle's long (x) axis
+    # The jaws must close *across* the bar, i.e. along y — closing along the bar's own x axis
+    # grips nothing at all.
+    jaw = np.array([0.0, 1.0, 0.0])
     travel = spec.travel if distance is None else distance
 
-    yield from set_gripper(world, arm, 0.5, settle=0.15, dt=dt)
+    # Pre-open just wide enough for the 14 mm handle bar: jaws opened further sweep a much
+    # larger volume and the collision screen (correctly) rejects every approach to the cabinet.
+    yield from set_gripper(world, arm, 0.25, settle=0.15, dt=dt)
     yield from goto_pose(world, arm, handle + UP * 0.08, jaw=jaw, duration=1.2, dt=dt,
                          tolerance=0.02, label="pre-handle")
     yield from goto_pose(world, arm, handle, jaw=jaw, duration=0.9, dt=dt, label="handle")
     yield from set_gripper(world, arm, 0.0, settle=0.45, dt=dt)
 
-    # Pull in small increments: a single long IK jump would swing the wrist through the drawer.
-    steps = 5
-    for i in range(1, steps + 1):
+    # Pull in small increments, re-reading the handle each time and stopping on the *measured*
+    # opening rather than after a fixed number of steps: the servos lag, so a fixed count
+    # systematically under-opens the drawer.
+    target_opening = min(travel, spec.travel) * 0.97
+    for _ in range(12):
+        if world.drawer_opening() >= target_opening:
+            break
         pulled = world.site_pos("drawer_handle").copy()
-        pulled[1] -= travel / steps
-        yield from goto_pose(world, arm, pulled, jaw=jaw, duration=0.45, dt=dt, tolerance=0.025,
+        pulled[1] -= 0.022
+        yield from goto_pose(world, arm, pulled, jaw=jaw, duration=0.4, dt=dt, tolerance=0.03,
                              label="pull")
-    yield from set_gripper(world, arm, 0.6, settle=0.25, dt=dt)
+    yield from set_gripper(world, arm, 0.35, settle=0.25, dt=dt)
     yield from retreat(world, arm, height=0.10, duration=0.7, dt=dt)
 
     if world.drawer_opening() < spec.open_threshold:

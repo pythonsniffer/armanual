@@ -101,6 +101,28 @@ def _object_xml(obj: ObjectSpec, scale_friction: float) -> str:
                 f'pos="{sx * math.cos(a):.4f} {sx * math.sin(a):.4f} {wall_h + 0.004:.4f}" '
                 f'quat="{_q(a + math.pi / 2)}" mass="{obj.mass * 0.55 / n_wall:.5f}" {common}/>'
             )
+        if obj.category == "bottle":
+            # A narrowed neck above the body. Gripping a 24 mm neck is far more reliable than
+            # spanning the 48 mm body (measured in scripts/grasp_sweep.py), and it puts the
+            # spout where a pour needs it.
+            neck_r = sx * 0.5
+            neck_z = 2 * wall_h + 0.004
+            for i in range(6):
+                a = 2 * math.pi * i / 6
+                parts.append(
+                    f'<geom name="g_{obj.name}_n{i}" type="box" '
+                    f'size="{neck_r * math.tan(math.pi / 6):.4f} 0.003 0.016" '
+                    f'pos="{neck_r * math.cos(a):.4f} {neck_r * math.sin(a):.4f} '
+                    f'{neck_z + 0.016:.4f}" quat="{_q(a + math.pi / 2)}" mass="0.004" {common}/>'
+                )
+            parts.append(
+                f'<site name="neck_{obj.name}" pos="0 0 {neck_z + 0.020:.4f}" size="0.004" '
+                f'rgba="0 0 0 0"/>'
+            )
+            parts.append(
+                f'<site name="spout_{obj.name}" pos="0 0 {neck_z + 0.034:.4f}" size="0.004" '
+                f'rgba="0 0 0 0"/>'
+            )
         # Interior reference point: used to score "water landed in the cup".
         parts.append(
             f'<site name="mouth_{obj.name}" pos="0 0 {2 * wall_h:.4f}" size="0.004" rgba="0 0 0 0"/>'
@@ -181,30 +203,39 @@ def scene_xml(scene: SceneSpec) -> str:
         dx, dy, dz = d.pos
         drawer = f"""
     <body name="drawer_case" pos="{dx:.4f} {dy:.4f} {dz + 0.001:.4f}">
-      <geom name="g_case_back" type="box" size="0.085 0.006 0.045" pos="0 0.075 0.045"
+      <!-- Low-profile cabinet. Height is set by what the SO-101 gripper can clear: with a taller
+           top panel the wrist collides with the cabinet on every top-down handle grasp, which the
+           collision-aware IK correctly reports as unreachable. -->
+      <geom name="g_case_back" type="box" size="0.085 0.006 0.024" pos="0 0.075 0.024"
             material="mat_furniture"/>
-      <geom name="g_case_l" type="box" size="0.006 0.075 0.045" pos="-0.085 0 0.045"
+      <geom name="g_case_l" type="box" size="0.006 0.075 0.024" pos="-0.085 0 0.024"
             material="mat_furniture"/>
-      <geom name="g_case_r" type="box" size="0.006 0.075 0.045" pos="0.085 0 0.045"
+      <geom name="g_case_r" type="box" size="0.006 0.075 0.024" pos="0.085 0 0.024"
             material="mat_furniture"/>
-      <geom name="g_case_top" type="box" size="0.091 0.081 0.006" pos="0 0 0.096"
+      <geom name="g_case_top" type="box" size="0.091 0.081 0.004" pos="0 0 0.052"
             material="mat_furniture"/>
-      <body name="drawer_box" pos="0 0 0.006">
+      <body name="drawer_box" pos="0 0 0.004">
         <joint name="drawer_slide" type="slide" axis="0 -1 0" range="0 {d.travel:.4f}"
-               damping="12" frictionloss="0.8"/>
-        <geom name="g_drawer_floor" type="box" size="0.076 0.070 0.004" pos="0 0 0.004"
+               damping="6" frictionloss="0.25"/>
+        <geom name="g_drawer_floor" type="box" size="0.076 0.070 0.003" pos="0 0 0.003"
               material="mat_furniture" friction="1.0 0.005 0.0001" condim="4"/>
-        <geom name="g_drawer_front" type="box" size="0.078 0.006 0.026" pos="0 -0.070 0.030"
+        <geom name="g_drawer_front" type="box" size="0.078 0.005 0.018" pos="0 -0.070 0.018"
               material="mat_furniture"/>
-        <geom name="g_drawer_bl" type="box" size="0.004 0.070 0.020" pos="-0.076 0 0.024"
+        <geom name="g_drawer_bl" type="box" size="0.003 0.070 0.013" pos="-0.076 0 0.016"
               material="mat_furniture"/>
-        <geom name="g_drawer_br" type="box" size="0.004 0.070 0.020" pos="0.076 0 0.024"
+        <geom name="g_drawer_br" type="box" size="0.003 0.070 0.013" pos="0.076 0 0.016"
               material="mat_furniture"/>
-        <geom name="g_drawer_handle" type="cylinder" size="0.008 0.026" pos="0 -0.084 0.030"
-              quat="0.7071 0 0.7071 0" material="mat_handle" friction="1.2 0.01 0.001"
-              condim="4" priority="1"/>
-        <site name="drawer_handle" pos="0 -0.084 0.030" size="0.005" rgba="0 0 0 0"/>
-        <site name="drawer_inside" pos="0 0 0.012" size="0.005" rgba="0 0 0 0"/>
+        <!-- The handle stands ~25 mm proud of the drawer front so the far jaw has room behind it
+             and the gripper body stays clear of the cabinet on a top-down grasp. -->
+        <geom name="g_drawer_handle" type="cylinder" size="0.007 0.030" pos="0 -0.100 0.024"
+              quat="0.7071 0 0.7071 0" material="mat_handle" friction="1.5 0.01 0.001"
+              condim="4" priority="1" solref="0.008 1"/>
+        <geom name="g_drawer_post_l" type="box" size="0.004 0.015 0.004" pos="-0.032 -0.085 0.024"
+              material="mat_handle"/>
+        <geom name="g_drawer_post_r" type="box" size="0.004 0.015 0.004" pos="0.032 -0.085 0.024"
+              material="mat_handle"/>
+        <site name="drawer_handle" pos="0 -0.100 0.024" size="0.005" rgba="0 0 0 0"/>
+        <site name="drawer_inside" pos="0 0 0.010" size="0.005" rgba="0 0 0 0"/>
       </body>
     </body>"""
 

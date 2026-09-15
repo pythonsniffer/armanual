@@ -16,6 +16,7 @@ Frames (measured from the vendered MJCF, not assumed):
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 
 import mujoco
@@ -29,9 +30,10 @@ class IKResult:
     rot_error: float
     iterations: int
     converged: bool
+    accepted: bool = True
 
     def ok(self, pos_tol: float = 0.006, rot_tol: float = 0.45) -> bool:
-        return self.pos_error <= pos_tol and self.rot_error <= rot_tol
+        return self.pos_error <= pos_tol and self.rot_error <= rot_tol and self.accepted
 
 
 def grasp_frame(approach: np.ndarray, jaw: np.ndarray | None = None) -> np.ndarray:
@@ -82,12 +84,17 @@ def solve_ik(
     step_scale: float = 0.6,
     seed: int | None = None,
     restarts: int = 4,
+    accept: "Callable[[np.ndarray], bool] | None" = None,
 ) -> IKResult:
     """Solve for joint angles putting ``site_id`` at ``target_pos`` (and near ``target_mat``).
 
     Runs on a scratch ``MjData`` so the caller's simulation state is never disturbed. Random
     restarts handle the SO-101's elbow-up / elbow-down ambiguity and the plain fact that a
     5-DOF arm has a lot of local minima near the workspace boundary.
+
+    ``accept`` lets the caller veto a converged solution — used to reject configurations the
+    servos cannot statically hold (see :func:`armanual.control.kinematics.holdable`), so the
+    search keeps exploring branches instead of returning a pose that will sag.
     """
     scratch = mujoco.MjData(model)
     lower = model.jnt_range[model.dof_jntid[dof_adr], 0]
@@ -140,17 +147,25 @@ def solve_ik(
             if target_mat is not None
             else 0.0
         )
+        accepted = accept is None or bool(accept(q))
         result = IKResult(
             qpos=q.copy(),
             pos_error=pos_error,
             rot_error=rot_error,
             iterations=iters,
             converged=pos_error < pos_tol and rot_error < rot_tol,
+            accepted=accepted,
         )
-        score = pos_error + 0.05 * rot_error
-        if best is None or score < best.pos_error + 0.05 * best.rot_error:
+        # An unacceptable (e.g. torque-infeasible) pose is kept only as a last resort.
+        score = pos_error + 0.05 * rot_error + (0.0 if accepted else 10.0)
+        best_score = (
+            best.pos_error + 0.05 * best.rot_error + (0.0 if best.accepted else 10.0)
+            if best is not None
+            else float("inf")
+        )
+        if score < best_score:
             best = result
-        if result.converged:
+        if result.converged and accepted:
             break
 
     assert best is not None

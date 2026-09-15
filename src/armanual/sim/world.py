@@ -59,6 +59,8 @@ class World:
         self.data = mujoco.MjData(self.model)
         self.render_size = render_size
         self._renderers: dict[tuple[int, int], mujoco.Renderer] = {}
+        self._scratch: mujoco.MjData | None = None
+        self._arm_geoms: dict[str, set[int]] = {}
         self.arms: dict[str, ArmHandle] = {a.name: self._arm_handle(a.name) for a in scene.arms}
         self.reset()
 
@@ -83,6 +85,43 @@ class World:
             gripper_body=self._id(mujoco.mjtObj.mjOBJ_BODY, f"{arm}/gripper"),
             wrist_cam=self._id(mujoco.mjtObj.mjOBJ_CAMERA, f"{arm}/wrist_cam"),
         )
+
+    def arm_geom_ids(self, arm: str) -> set[int]:
+        """Geom ids belonging to one arm's kinematic subtree (cached)."""
+        if arm not in self._arm_geoms:
+            root = self.arms[arm].base_body
+            bodies = {root}
+            for body in range(self.model.nbody):
+                parent = body
+                while parent > 0:
+                    if parent == root:
+                        bodies.add(body)
+                        break
+                    parent = self.model.body_parentid[parent]
+            self._arm_geoms[arm] = {
+                g
+                for body in bodies
+                for g in range(
+                    self.model.body_geomadr[body],
+                    self.model.body_geomadr[body] + self.model.body_geomnum[body],
+                )
+            }
+        return self._arm_geoms[arm]
+
+    def object_geom_ids(self, obj_name: str) -> set[int]:
+        body = self._id(mujoco.mjtObj.mjOBJ_BODY, f"obj_{obj_name}")
+        return set(
+            range(
+                self.model.body_geomadr[body],
+                self.model.body_geomadr[body] + self.model.body_geomnum[body],
+            )
+        )
+
+    def scratch_data(self) -> mujoco.MjData:
+        """A reusable spare ``MjData`` for kinematics/dynamics queries off the main state."""
+        if self._scratch is None:
+            self._scratch = mujoco.MjData(self.model)
+        return self._scratch
 
     # ------------------------------------------------------------------------ episode state
     def reset(self, settle_seconds: float = 0.6) -> None:

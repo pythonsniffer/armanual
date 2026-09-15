@@ -106,19 +106,22 @@ _NOMINAL: tuple[dict, ...] = (
          size=(0.027, 0.027, 0.032), color="blue", mass=0.055, size_label="medium"),
     dict(name="cup_distract", category="cup", pos=(-0.12, -0.03, 0.0),
          size=(0.026, 0.026, 0.030), color="navy", mass=0.050, size_label="medium"),
-    dict(name="bottle_water", category="bottle", pos=(-0.35, -0.19, 0.0),
-         size=(0.029, 0.029, 0.052), color="green", mass=0.16, size_label="large"),
-    dict(name="tray_1", category="tray", pos=(0.30, -0.17, 0.008),
+    # The bottle sits on the right, opposite the drawer on the left: the two task dependencies
+    # then start on opposite sides of the table, which is what forces genuine arm cooperation
+    # rather than one arm doing everything.
+    dict(name="bottle_water", category="bottle", pos=(0.30, -0.13, 0.0),
+         size=(0.024, 0.024, 0.045), color="green", mass=0.115, size_label="large"),
+    dict(name="tray_1", category="tray", pos=(0.30, -0.04, 0.008),
          size=(0.065, 0.048, 0.005), color="brown", mass=0.13, size_label="large"),
 )
 
 #: Utensils start inside the drawer — retrieving them is the multi-step dependency.
 _DRAWER_ITEMS: tuple[dict, ...] = (
-    dict(name="spoon_1", category="spoon", pos=(-0.048, -0.005, 0.022), yaw0=math.pi / 2,
+    dict(name="spoon_1", category="spoon", pos=(-0.048, -0.005, 0.016), yaw0=math.pi / 2,
          size=(0.026, 0.011, 0.0028), color="silver", mass=0.022, size_label="medium"),
-    dict(name="fork_1", category="fork", pos=(0.002, -0.005, 0.022), yaw0=math.pi / 2,
+    dict(name="fork_1", category="fork", pos=(0.002, -0.005, 0.016), yaw0=math.pi / 2,
          size=(0.026, 0.010, 0.0028), color="silver", mass=0.022, size_label="medium"),
-    dict(name="knife_1", category="knife", pos=(0.050, -0.005, 0.022), yaw0=math.pi / 2,
+    dict(name="knife_1", category="knife", pos=(0.050, -0.005, 0.016), yaw0=math.pi / 2,
          size=(0.030, 0.008, 0.0030), color="silver", mass=0.026, size_label="medium"),
 )
 
@@ -180,6 +183,28 @@ def _avoid_drawer(objects: list[ObjectSpec], drawer_pos, present: bool) -> list[
             x = drawer_pos[0] + sign * (hx + radius + 0.015)
             obj = _with_xy(obj, (x, y))
         out.append(obj)
+    return out
+
+
+def _clear_of_bases(objects: list[ObjectSpec], arms) -> list[ObjectSpec]:
+    """Push objects out of the arms' own footprints.
+
+    An object parked next to a shoulder is not a hard task, it is a blocked one: every IK
+    solution collides with the arm's own base and the episode fails for a reason that has
+    nothing to do with manipulation skill.
+    """
+    out = []
+    for obj in objects:
+        pos = np.array(obj.pos[:2])
+        for arm in arms:
+            base = np.array(arm.base_pos[:2])
+            delta = pos - base
+            dist = float(np.linalg.norm(delta))
+            keep = REACH_MIN + max(obj.size[0], obj.size[1])
+            if dist < keep:
+                direction = delta / (dist + 1e-9) if dist > 1e-6 else np.array([0.0, 1.0])
+                pos = base + direction * keep
+        out.append(_with_xy(obj, pos))
     return out
 
 
@@ -300,8 +325,10 @@ def sample_scene(
         objects += [_make_object(_DISTRACTORS[i], rng, cfg, arms, in_drawer=False) for i in chosen]
 
     objects = _avoid_drawer(objects, drawer_pos, drawer)
+    objects = _clear_of_bases(objects, arms)
     objects = _separate(objects)
     objects = _avoid_drawer(objects, drawer_pos, drawer)
+    objects = _clear_of_bases(objects, arms)
 
     lighting = LightingSpec()
     if cfg.lighting:
