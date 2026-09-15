@@ -18,7 +18,7 @@
                  │                └─────────┬─────────┘                    │
                  └──────────────────────────┼──────────────────────────────┘
                                             │ 12-dim bimanual actions
-                 ┌───────────▼──────────────────────────────▼──────────────┐
+                 ┌──────────────────────────▼──────────────────────────────┐
                  │          MuJoCo: two SO-101 arms, dinner table          │
                  └───────────┬─────────────────────────────────────────────┘
                              │ RGB-D from 3 cameras
@@ -31,9 +31,9 @@
 ```
 
 Every arrow is a plain dataclass defined in `task/schema.py` or `planning/planner.py`, and every
-stage is separately testable. The loop closes twice: inside a skill (the controller re-observes
-between waypoints, and the wrist camera refines a grasp at close range) and between subgoals (a
-full re-observation, re-grounding and re-plan).
+stage is separately testable. The loop closes at the subgoal boundary: the scene is re-observed,
+the instruction is re-grounded against it, and the next sentence is chosen from what is actually
+there. Inside a subgoal the policy runs closed-loop on its own cameras at 20 Hz.
 
 ## Layers
 
@@ -78,15 +78,17 @@ pathway.
 
 ### 4. Planning — `armanual/planning/`
 
-- **Decomposition**: preconditions are checked against the observation, so the drawer step exists
-  only while the drawer is shut.
-- **Dynamic arm assignment**: each arm is costed by whether it can reach the pick *and* the place,
-  using the same torque- and collision-screened IK the controller uses. No object class is tied to
-  an arm.
-- **Hand-off insertion**: when one arm can reach the object and the other the destination, a
-  hand-off through the shared middle band is planned — because the geometry requires it.
+At run time this layer produces **sentences, not motions**:
+
+- **Subgoal decomposition** turns "set the table and pour water into the blue cup" into the
+  sequence of instructions the policy was trained on, and re-checks preconditions against the
+  current observation between them — so the cutlery subgoal appears only once the drawer is open.
 - **Style layer**: `place_setting.py` turns a named style into slot coordinates, so "set the table
-  in the japanese style" changes where things go, not just what is said about them.
+  in the japanese style" changes *which sentences* are issued and where things must end up.
+
+The rest of this layer — dynamic arm assignment, hand-off insertion, reach costing through the
+torque- and collision-screened IK — drives the **demonstration generator** and the analytical
+baseline. Which arm does what, in a policy run, is decided by the policy.
 
 ### 5. Control — `armanual/control/` (demonstration generator, **not** the runtime)
 
