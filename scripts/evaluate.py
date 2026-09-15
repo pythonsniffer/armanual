@@ -34,8 +34,9 @@ def main() -> None:
     parser.add_argument("--ov-device", default=None,
                         help="run the policy through OpenVINO on this device (CPU/GPU/NPU)")
     parser.add_argument("--ir-dir", type=Path, default=None, help="exported IR directory")
-    parser.add_argument("--no-fallback", action="store_true",
-                        help="report the policy alone, with no scripted fallback")
+    parser.add_argument("--fallback", action="store_true",
+                        help="allow the scripted controller to rescue subgoals the policy fails "
+                             "(off by default: the deployed system is pure VLA)")
     args = parser.parse_args()
 
     if args.task:
@@ -62,7 +63,7 @@ def main() -> None:
             print(f"policy on {backend.name}")
 
     payload = run_suite(tasks, seeds, privileged=args.privileged, out_dir=args.out,
-                        backend=backend, fallback=not args.no_fallback)
+                        backend=backend, fallback=args.fallback)
     print("\n" + json.dumps(payload["summary"]["overall"], indent=2))
     print("by tier:", json.dumps(payload["summary"]["by_tier"], indent=2))
     if payload["summary"].get("failure_kinds"):

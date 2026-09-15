@@ -159,7 +159,7 @@ def count_liquid_in_cups(world, margin: float = 0.004) -> int:
 def run_episode(task: TaskDefinition, seed: int, *, privileged: bool = False,
                 instruction: str | None = None, modality: str = "text",
                 capture=None, max_steps: int | None = None,
-                backend=None, fallback: bool = True) -> EpisodeResult:
+                backend=None, fallback: bool = False) -> EpisodeResult:
     """Run one (task, seed) episode and score it.
 
     With ``backend`` set, the episode runs through the subgoal runner and the learned policy;
@@ -292,7 +292,7 @@ def _flushing_print(*args, **kwargs):
 
 def run_suite(tasks: list[TaskDefinition], seeds: list[int], *, privileged: bool = False,
               out_dir: Path | None = None, progress=_flushing_print, backend=None,
-              fallback: bool = True) -> dict:
+              fallback: bool = False) -> dict:
     """Run every (task, seed) pair and write machine-readable results."""
     results: list[EpisodeResult] = []
     for task in tasks:

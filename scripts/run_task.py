@@ -60,8 +60,9 @@ def main() -> None:
                         help="checkpoint directory; omit to run the analytical baseline")
     parser.add_argument("--backend", choices=["torch", "openvino"], default="torch")
     parser.add_argument("--device", default="cuda")
-    parser.add_argument("--no-fallback", action="store_true",
-                        help="do not fall back to the scripted controller when the policy fails")
+    parser.add_argument("--fallback", action="store_true",
+                        help="let the scripted controller rescue failed subgoals (off by default: "
+                             "the deployed system is pure VLA)")
     parser.add_argument("--record", type=Path, default=None, help="write an mp4 here")
     parser.add_argument("--randomize", action="store_true", help="full scene randomization")
     parser.add_argument("--json", type=Path, default=None)
@@ -72,7 +73,7 @@ def main() -> None:
     observer = CameraObserver(world)
     backend = build_backend(args)
 
-    runner = SubgoalRunner(world, observer, backend=backend, fallback=not args.no_fallback)
+    runner = SubgoalRunner(world, observer, backend=backend, fallback=args.fallback)
     overlay = OverlayState(
         instruction=args.instruction,
         controller="scripted" if backend is None else runner.mode,

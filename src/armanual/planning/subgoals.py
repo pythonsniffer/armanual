@@ -6,15 +6,17 @@ trained on, and each one is executed, verified against a fresh camera observatio
 followed by the next. The loop stays closed at the subgoal boundary: if the cup was knocked over
 while the fork was being placed, the next observation sees it.
 
-Each subgoal can be executed by either the learned policy or the scripted controller, behind one
-interface, which makes three things directly comparable on the same episodes:
+**The deployed system is the VLA and nothing else.** Every joint command in an evaluation run comes
+from the policy; there is no scripted fallback, and the analytical controller exists only to
+generate the demonstrations the policy was trained on.
 
-* **scripted** — the analytical baseline,
-* **policy** — the VLA alone, and
-* **policy with fallback** — the VLA first, the scripted controller only for subgoals it fails.
+A scripted path is still reachable (``fallback=True``, or omitting the backend) because it is the
+baseline the policy is measured *against* — but it is off by default, and every result records
+which controller produced it, so a policy number can never quietly contain scripted successes.
 
-The third is what a deployed system would do, and reporting all three keeps the comparison honest
-rather than quietly crediting the policy with the fallback's successes.
+Between subgoals both arms return to their home pose. That is a fixed reset command issued by the
+harness so the cameras can see the table for verification, not task-solving control: an arm left
+stretched over the table hides the object the check is looking for.
 """
 
 from __future__ import annotations
@@ -200,7 +202,7 @@ def verify_subgoal(world, observer, sentence: str, *, before=None) -> tuple[bool
 class SubgoalRunner:
     """Runs an instruction as a subgoal sequence, with a policy, the scripted stack, or both."""
 
-    def __init__(self, world, observer, *, backend=None, fallback: bool = True,
+    def __init__(self, world, observer, *, backend=None, fallback: bool = False,
                  policy_seconds: float = 20.0, dt: float = 0.05):
         self.world = world
         self.observer = observer

@@ -1,10 +1,10 @@
-"""Fine-tune SmolVLA (or train ACT) on the collected dataset.
+"""Fine-tune SmolVLA on the collected dataset.
 
 This wraps LeRobot's own trainer rather than reimplementing one: the recipe stays the published
 one, and anyone can reproduce it from the printed command alone.
 
-    python scripts/train_policy.py --policy smolvla --steps 20000
-    python scripts/train_policy.py --policy act --steps 40000 --batch-size 16
+    python scripts/train_policy.py --steps 20000
+    python scripts/train_policy.py --steps 40000 --image-size 224   # smaller images, more steps
 
 Memory notes for an 8 GB card (RTX 5050 and similar):
 
@@ -65,14 +65,6 @@ POLICY_PRESETS = {
             "--policy.resize_imgs_with_padding=[256,256]",
             "--policy.push_to_hub=false",
         ],
-    },
-    "act": {
-        "path": None,  # trained from scratch
-        "type": "act",
-        "batch_size": 16,
-        "grad_accum": 1,
-        "steps": 40000,
-        "extra": ["--policy.push_to_hub=false"],
     },
 }
 
