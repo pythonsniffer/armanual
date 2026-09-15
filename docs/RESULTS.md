@@ -151,3 +151,17 @@ pytest tests/ -q                  # 27 tests
 
 Every result file records the host environment, the seeds, and the exact task definitions, so a
 number can be traced back to the episode that produced it.
+
+## 9. What was verified on this machine, and what was not
+
+| Claim | Verified how | Where |
+| --- | --- | --- |
+| Scene, perception, IK, parser all work | `python -m armanual.cli verify` — 8/8 | this repo |
+| Determinism, grasp geometry, reach limits | `pytest tests/ -q` — 34 tests | `tests/` |
+| Perception accuracy | 10 randomized seeds against ground truth | §1 |
+| Demonstration collection | 206 episodes attempted, 114 kept, published to the Hub | §4 |
+| SmolVLA fine-tune runs | 20k steps launched; loss 0.99 → 0.11 in 500 steps | §5 |
+| OpenVINO conversion | vision tower + connector convert; action expert does not | §7 |
+| INT8 quantization | 1.97× smaller, 1.71× faster, simulator-calibrated | §7 |
+| **Intel CPU/iGPU/NPU figures** | **not measured — no Core Ultra machine available** | §7 |
+| **Policy task success** | **pending the end of training** | §6 |
