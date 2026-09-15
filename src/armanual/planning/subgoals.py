@@ -112,11 +112,47 @@ def subgoal_target(world, observer, sentence: str, grounder: Grounder | None = N
     return None, None
 
 
+#: A placement subgoal must move its object at least this far to count. Without it, a scene that
+#: happens to start with the plate near the middle scores a pass for a robot that did nothing.
+MIN_TRAVEL = 0.015
+
+
+def subgoal_baseline(world, observer, sentence: str) -> dict:
+    """Snapshot what the scene looks like before a subgoal, for honest verification afterwards."""
+    text = sentence.lower()
+    if "drawer" in text and "open" in text:
+        return {"drawer": world.drawer_opening()}
+    if "pour" in text or "fill" in text:
+        from armanual.eval.harness import count_liquid_in_cups
+
+        return {"liquid": count_liquid_in_cups(world)}
+    category, target = subgoal_target(world, observer, sentence)
+    if target is None:
+        return {}
+    observation = observer.observe()
+    candidates = [
+        d for d in observation.detections
+        if d.category not in ("furniture", "unknown")
+        and (category in ("", None) or d.category == category)
+    ]
+    if not candidates:
+        return {"nearest_before": None}
+    nearest = min(candidates, key=lambda d: float(np.linalg.norm(d.position[:2] - target)))
+    return {
+        "nearest_before": float(np.linalg.norm(nearest.position[:2] - target)),
+        "position_before": nearest.position[:2].copy(),
+    }
+
+
 def verify_subgoal(world, observer, sentence: str, *, before=None) -> tuple[bool, str]:
     """Check a subgoal's effect against a fresh observation.
 
     Deliberately checks the *world*, not the controller's opinion of the world: a policy that
     believes it placed the cup and a cup that is actually on the floor must not score the same.
+
+    ``before`` is a :func:`subgoal_baseline` snapshot. With it, a placement only counts when the
+    object actually travelled — a scene that starts with the plate near the middle must not give
+    a robot credit for standing still.
     """
     text = sentence.lower()
     if "drawer" in text and "open" in text:
@@ -128,7 +164,8 @@ def verify_subgoal(world, observer, sentence: str, *, before=None) -> tuple[bool
         from armanual.eval.harness import count_liquid_in_cups
 
         inside = count_liquid_in_cups(world)
-        return inside >= 1, f"{inside} liquid particles in a cup"
+        started_with = (before or {}).get("liquid", 0)
+        return inside > started_with, f"{inside} liquid particles in a cup (was {started_with})"
 
     category, target = subgoal_target(world, observer, sentence)
     if target is None:
@@ -145,7 +182,19 @@ def verify_subgoal(world, observer, sentence: str, *, before=None) -> tuple[bool
         return False, f"no {category or 'object'} visible after the subgoal"
     best = min(candidates, key=lambda d: float(np.linalg.norm(d.position[:2] - target)))
     distance = float(np.linalg.norm(best.position[:2] - target))
-    return distance <= SUBGOAL_TOLERANCE, f"nearest {best.category} {distance * 1000:.0f}mm from target"
+    placed = distance <= SUBGOAL_TOLERANCE
+    detail = f"nearest {best.category} {distance * 1000:.0f}mm from target"
+
+    if placed and before and before.get("position_before") is not None:
+        travelled = float(np.linalg.norm(best.position[:2] - np.asarray(before["position_before"])))
+        started_placed = (before.get("nearest_before") or 1e9) <= SUBGOAL_TOLERANCE
+        if started_placed and travelled < MIN_TRAVEL:
+            return False, (
+                f"{detail}, but it was already there and only moved "
+                f"{travelled * 1000:.0f}mm — the robot did not place it"
+            )
+        detail += f" (travelled {travelled * 1000:.0f}mm)"
+    return placed, detail
 
 
 class SubgoalRunner:
@@ -169,6 +218,23 @@ class SubgoalRunner:
             return "scripted"
         return "policy+fallback" if self.fallback else "policy"
 
+    def park_arms(self, seconds: float = 12.0) -> None:
+        """Return both arms to their home pose.
+
+        Done before every check: an arm left stretched over the table hides the very object the
+        verification is looking for, and "I cannot see it" would be scored as "it is not there".
+        It also gives the next subgoal a known starting configuration.
+        """
+        from armanual.control import primitives as prim
+        from armanual.control.executor import Scheduler
+
+        scheduler = Scheduler(self.world, dt=self.dt)
+        scheduler.on_tick.extend(self.on_frame)
+        scheduler.run(
+            {arm: prim.home(self.world, arm, dt=self.dt) for arm in self.world.arms},
+            max_seconds=seconds,
+        )
+
     def run(self, instruction: str, *, style: str | None = None, seed: int = 0) -> SubgoalEpisode:
         plan = decompose(instruction, style=style)
         episode = SubgoalEpisode(instruction=instruction, style=style, seed=seed, mode=self.mode)
@@ -178,6 +244,7 @@ class SubgoalRunner:
             started = time.perf_counter()
             used = "scripted"
             inference: dict = {}
+            baseline = subgoal_baseline(self.world, self.observer, sentence)
 
             if self.backend is not None:
                 from armanual.policy.runtime import PolicyRunner
@@ -187,12 +254,13 @@ class SubgoalRunner:
                 record = runner.run(sentence, max_seconds=self.policy_seconds)
                 inference = record.get("inference", {})
                 used = "policy"
-                ok, detail = verify_subgoal(self.world, self.observer, sentence)
+                self.park_arms()
+                ok, detail = verify_subgoal(self.world, self.observer, sentence, before=baseline)
                 if not ok and self.fallback:
-                    ok, detail = self._run_scripted(sentence)
+                    ok, detail = self._run_scripted(sentence, baseline)
                     used = "policy+scripted"
             else:
-                ok, detail = self._run_scripted(sentence)
+                ok, detail = self._run_scripted(sentence, baseline)
 
             episode.results.append(
                 SubgoalResult(
@@ -209,7 +277,7 @@ class SubgoalRunner:
         episode.sim_seconds = self.world.time - sim_started
         return episode
 
-    def _run_scripted(self, sentence: str) -> tuple[bool, str]:
+    def _run_scripted(self, sentence: str, baseline: dict | None = None) -> tuple[bool, str]:
         # One executor for the whole episode. Each one owns a wrist-camera refiner with its own GL
         # renderers, so building a fresh executor per subgoal leaks contexts across a ten-seed
         # sweep and eventually exhausts them.
@@ -217,7 +285,8 @@ class SubgoalRunner:
             self._executor = ClosedLoopExecutor(self.world, self.observer, max_steps=4, dt=self.dt)
             self._executor.on_frame.extend(self.on_frame)
         self._executor.run(sentence)
-        return verify_subgoal(self.world, self.observer, sentence)
+        self.park_arms()
+        return verify_subgoal(self.world, self.observer, sentence, before=baseline)
 
     def close(self) -> None:
         if self._executor is not None:
