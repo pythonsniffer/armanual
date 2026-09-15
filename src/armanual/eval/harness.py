@@ -280,8 +280,18 @@ def environment_info() -> dict:
     return info
 
 
+def _flushing_print(*args, **kwargs):
+    """Progress that shows up in a redirected log immediately.
+
+    A long evaluation writing to a file is invisible for minutes at a time otherwise, because
+    Python block-buffers stdout when it is not a terminal — which looks exactly like a hang.
+    """
+    kwargs.setdefault("flush", True)
+    print(*args, **kwargs)
+
+
 def run_suite(tasks: list[TaskDefinition], seeds: list[int], *, privileged: bool = False,
-              out_dir: Path | None = None, progress=print, backend=None,
+              out_dir: Path | None = None, progress=_flushing_print, backend=None,
               fallback: bool = True) -> dict:
     """Run every (task, seed) pair and write machine-readable results."""
     results: list[EpisodeResult] = []
