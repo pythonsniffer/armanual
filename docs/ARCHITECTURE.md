@@ -12,12 +12,12 @@
                                             │                    │
                  ┌──────────────────────────┴────────────────────▼─────────┐
                  │                    execution                            │
-                 │   ┌───────────────┐            ┌────────────────────┐   │
-                 │   │  VLA policy   │    or      │ analytical control │   │
-                 │   │ (SmolVLA/ACT) │  fallback  │ IK + primitives    │   │
-                 │   └───────┬───────┘            └─────────┬──────────┘   │
-                 └───────────┼──────────────────────────────┼──────────────┘
-                             │ 12-dim bimanual actions      │
+                 │                ┌───────────────────┐                    │
+                 │                │  SmolVLA policy   │  ← every joint     │
+                 │                │  images + text    │    command         │
+                 │                └─────────┬─────────┘                    │
+                 └──────────────────────────┼──────────────────────────────┘
+                                            │ 12-dim bimanual actions
                  ┌───────────▼──────────────────────────────▼──────────────┐
                  │          MuJoCo: two SO-101 arms, dinner table          │
                  └───────────┬─────────────────────────────────────────────┘
@@ -88,15 +88,18 @@ pathway.
 - **Style layer**: `place_setting.py` turns a named style into slot coordinates, so "set the table
   in the japanese style" changes where things go, not just what is said about them.
 
-### 5. Control — `armanual/control/`
+### 5. Control — `armanual/control/` (demonstration generator, **not** the runtime)
+
+This layer does not drive the robot in a deployed run. It exists to *produce the demonstrations*
+the policy learns from, which is what imitation learning requires an expert for, and to serve as
+the baseline the policy is measured against.
 
 Damped-least-squares IK for a 5-DOF arm, with two screens that turn silent failures into
 reportable ones: a **static torque** check (the shoulder saturates at 2.94 N·m inside the
 kinematic workspace) and a **collision** check against the real scene, including the other arm.
 
 Skills are generators advanced by a cooperative scheduler, so both arms can run different skills
-in the same tick — which is what makes hold-while-pouring and hand-offs real rather than
-interleaved scripts.
+in the same tick — which is what makes hold-while-pouring and hand-offs demonstrable at all.
 
 ### 6. Policy — `armanual/policy/`
 
@@ -109,11 +112,16 @@ interleaved scripts.
 | `openvino_export.py` | Per-component conversion to IR with optional NNCF INT8 |
 | `benchmark.py` | Latency/throughput measurement with warm-up separated and failed devices reported |
 
+**The policy is the controller.** In an evaluation or demonstration run, every joint command comes
+from SmolVLA. There is no scripted fallback and no hand-written trajectory; the analytical stack
+appears only upstream, as the process that generated the training data.
+
 **Why a subgoal-level policy rather than one end-to-end policy.** A single network trained on a
 few hundred demonstrations will not perform a minute-long, multi-object, dependency-laden task.
 Decomposing into language subgoals keeps the instruction end-to-end from the user's side while
-giving each skill enough data to learn. The decomposition is explicit and logged, so what the
-policy was asked to do at each moment is always visible.
+giving each skill enough data to learn. The decomposition is a *text* plan — it chooses which
+sentence the policy is conditioned on next — and it is logged, so what the policy was asked to do
+at each moment is always visible. It issues no motor commands.
 
 **Why 12-dimensional actions.** Recording only the moving arm would make hand-offs and
 hold-and-pour structurally unlearnable, since those are exactly the moments when one arm's correct

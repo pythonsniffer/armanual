@@ -43,7 +43,7 @@ re-plans. "The blue cup" means whichever cup is blue *now*.
 | | |
 | --- | --- |
 | **Perception is real** | Objects are found by segmenting an RGB-D point cloud from the simulated cameras. No simulator state is read anywhere in the control path. Measured: recall 0.92, precision 0.84, position error 8.6 mm |
-| **Arm assignment is computed** | Every step costs both arms using the same torque- and collision-screened IK the controller uses. No object class is bound to an arm |
+| **Control is the policy** | In a run, all twelve joint commands come from SmolVLA reading three cameras and the instruction text. The analytical stack generated the training data and is the baseline it is compared against — it does not drive the robot |
 | **Hand-offs happen for a reason** | When the pick is in one arm's workspace and the place is in the other's, the planner inserts a hand-off — it is not scripted into the demo |
 | **Ambiguity is measured** | "The blue cup" next to a navy cup produces a recorded ambiguity with both candidates and their scores |
 | **Failures are attributed** | Every failure is tagged perception / grounding / planning / reachability / grasp / placement / coordination / timeout |
@@ -87,7 +87,8 @@ A single network cannot learn a minute-long, multi-object, dependency-laden task
 hundred demonstrations. So the instruction is decomposed into **language subgoals**, and one
 policy — conditioned on the subgoal sentence — executes each of them:
 
-- **Model**: SmolVLA (`lerobot/smolvla_base`), fine-tuned; ACT on the same dataset as the fallback
+- **Model**: SmolVLA (`lerobot/smolvla_base`), fine-tuned. **Every joint command in a run comes
+  from the policy** — no scripted fallback, no hand-written trajectories
 - **Observation**: three cameras (overhead + both wrists), 12-dim bimanual state, instruction text
 - **Action**: 12-dim — *both arms* — so hand-offs and hold-and-pour are learnable rather than
   structurally impossible
