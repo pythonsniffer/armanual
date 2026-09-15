@@ -113,10 +113,24 @@ python scripts/benchmark_intel.py --checkpoint <ckpt> --export --precisions fp16
     --devices CPU GPU NPU --out outputs/benchmarks/core_ultra.json
 ```
 
-*Pending access to an Intel Core Ultra machine.* The harness runs anywhere and stamps
-`is_intel_core_ultra` into every results file, so a development-machine measurement can never be
-mistaken for a target-hardware one. On this AMD development machine OpenVINO reports CPU only,
-which is the expected and correct result.
+**The export and benchmark chain is proven end to end**, measured on the development machine
+(AMD Ryzen 7 250, OpenVINO 2026.3.1, CPU plugin only — `is_intel_core_ultra: false`):
+
+| Component | Precision | Size | Compile | Warm-up | p50 | Throughput |
+| --- | --- | --- | --- | --- | --- | --- |
+| SmolVLA vision tower (86.4 M params) | fp16 | 173.4 MB | 0.5 s | 170 ms | **60.3 ms** | 16.6 Hz |
+| SmolVLA vision tower | INT8 (NNCF) | **87.9 MB** | 0.5 s | — | **35.2 ms** | 28.4 Hz |
+
+INT8 gives **1.97× smaller and 1.71× faster** on the same graph, calibrated on frames rendered
+from the robot's own three cameras rather than a generic image corpus.
+
+Why this matters for device placement: the vision tower runs **once per camera**, and the policy
+uses three. At 60 ms each that is ~180 ms of vision per inference on a CPU — the single largest
+term in the loop, and precisely the workload an iGPU or NPU exists to absorb.
+
+*The Core Ultra figures are pending access to the target machine.* The harness runs anywhere and
+stamps `is_intel_core_ultra` into every results file, so a development-machine measurement can
+never be mistaken for a target-hardware one.
 
 What will be reported: per component (vision tower, action expert) × per device (CPU/iGPU/NPU) ×
 per precision (fp32/fp16/INT8): compile time, warm-up latency, steady-state p50/p95/max,

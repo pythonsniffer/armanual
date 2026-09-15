@@ -235,25 +235,29 @@ def save_metadata(out_dir: Path, metadata: dict) -> None:
     (out_dir / "armanual_policy.json").write_text(json.dumps(metadata, indent=2))
 
 
-def image_calibration_set(dataset_root: Path, count: int = 64,
-                          image_size: tuple[int, int] = (224, 224)):
-    """A small calibration set drawn from recorded demonstrations, for INT8 quantization.
+def simulator_calibration_set(count: int = 48, image_size: int = 256, seeds: int = 8):
+    """Calibration images rendered from the robot's own cameras.
 
-    Calibrating on the robot's *own* camera images matters: quantization ranges fitted to
-    ImageNet-like photos do not match a simulator's flat-shaded tabletop, and the accuracy loss
-    shows up as a policy that reaches slightly wrong.
+    Calibrating on the *right distribution* is the whole game for INT8. Activation ranges fitted
+    to photographs do not describe a flat-shaded simulated tabletop, and the mismatch shows up not
+    as an obvious error but as a policy that reaches a centimetre wrong. These frames come from
+    randomized scenes through the same three cameras the policy uses at run time.
     """
     import torch
 
-    frames = []
-    for shard in sorted(Path(dataset_root).rglob("*.npz"))[:4]:
-        data = np.load(shard)
-        for key in data.files:
-            if key.endswith(".wrist") or key.endswith(".scene"):
-                images = data[key]
-                for image in images[:: max(1, len(images) // 8)]:
-                    tensor = torch.from_numpy(image).permute(2, 0, 1).unsqueeze(0).float() / 255.0
-                    frames.append((tensor,))
-                    if len(frames) >= count:
-                        return frames
+    from armanual.policy.collect import CAMERAS
+    from armanual.sim.randomize import RandomizationConfig, sample_scene
+    from armanual.sim.world import World
+
+    frames: list[tuple] = []
+    for seed in range(seeds):
+        world = World(sample_scene(seed, RandomizationConfig()), fast_render=True)
+        for _key, camera in CAMERAS:
+            image = world.render(camera, size=(image_size, image_size))
+            tensor = torch.from_numpy(image.copy()).permute(2, 0, 1).unsqueeze(0).float() / 255.0
+            frames.append((tensor,))
+            if len(frames) >= count:
+                world.close()
+                return frames
+        world.close()
     return frames
