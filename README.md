@@ -92,7 +92,9 @@ policy — conditioned on the subgoal sentence — executes each of them:
 - **Action**: 12-dim — *both arms* — so hand-offs and hold-and-pour are learnable rather than
   structurally impossible
 - **Data**: recorded by running the analytical stack on generated instructions, successful
-  episodes only, published as a LeRobotDataset
+  episodes only — published as
+  [`pythonsniffer/armanual-dinner-table`](https://huggingface.co/datasets/pythonsniffer/armanual-dinner-table)
+  (114 episodes, 22k frames, 30 distinct instructions)
 
 Training runs on CUDA; **inference** is what must run on Intel, which is what the challenge asks
 for. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
@@ -120,6 +122,8 @@ See [docs/INTEL.md](docs/INTEL.md).
 | [RESULTS.md](docs/RESULTS.md) | Measured results with the commands that produced them |
 | [LIMITATIONS.md](docs/LIMITATIONS.md) | What does not work, and how far off it is |
 | [DEMO.md](docs/DEMO.md) | Video shot list, mapped to the rubric |
+| [DATASET_CARD.md](docs/DATASET_CARD.md) | What is in the demonstration dataset and how it was made |
+| [SUBMISSION.md](docs/SUBMISSION.md) | Deliverable checklist with verification commands |
 | [REPO_RECON.md](docs/REPO_RECON.md) | Phase 0 survey of the environment and assets |
 
 ## License
