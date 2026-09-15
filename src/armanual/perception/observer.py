@@ -13,7 +13,7 @@ observer produced it.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import mujoco
 import numpy as np
@@ -88,6 +88,7 @@ class CameraObserver:
             vs, us = np.mgrid[0:height_px, 0:width_px]
             points = model.unproject(us, vs, depth)
             points_by_camera[cam] = points
+            self._set_drawer_region(points)
             found = self.detector.detect_from_points(rgb, points)
             detections = self._merge(detections, found, primary=order == 0)
         self._assign_tracks(detections)
@@ -96,6 +97,25 @@ class CameraObserver:
             drawer_open=self._estimate_drawer(points_by_camera[cameras[0]]),
             camera="+".join(cameras),
             stamp=self.world.time,
+        )
+
+    def _set_drawer_region(self, points: np.ndarray) -> None:
+        """Raise the height threshold inside the drawer, wherever the drawer currently is."""
+        spec = self.world.scene.drawer
+        if not spec.present:
+            return
+        opening = self._estimate_drawer(points)
+        centre_y = spec.pos[1] - opening
+        # Clearance sits just above the drawer's floor: high enough to cut the floor itself out of
+        # the "above the table" mask, low enough that a 17 mm-tall utensil still shows several
+        # millimetres of height and survives the minimum-blob-size test.
+        self.detector.config = replace(
+            self.detector.config,
+            region_slabs=((spec.pos[0], centre_y, 0.085, 0.085, 0.0125, 0.021),),
+            furniture_boxes=(
+                (spec.pos[0], spec.pos[1], 0.11, 0.11),
+                (spec.pos[0], centre_y, 0.10, 0.10),
+            ),
         )
 
     def _merge(self, existing: list[Detection], new: list[Detection], *,

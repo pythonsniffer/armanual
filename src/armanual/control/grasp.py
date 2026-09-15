@@ -172,11 +172,14 @@ def grasp_from_detection(detection, base_xy, *, obj_yaw: float | None = None) ->
         return GraspSpec(pos=body, jaw=radial, width=min(2 * radius, 0.075), lift=0.10,
                          approach_height=0.085, seat=0.0, label="cup-span")
     if detection.category == "utensil":
-        # The detector sees a sliver; its major axis gives the handle direction.
-        yaw = obj_yaw if obj_yaw is not None else 0.0
+        # The detector sees a sliver, and inside the drawer it is sliced at cutlery height — so
+        # what survives is mostly the raised *handle*, the only part the jaws can actually close
+        # on. Grasp the visible centroid rather than guessing an offset along the blade, and use
+        # the blob's major axis to close the jaws across the handle, not along it.
+        yaw = obj_yaw if obj_yaw is not None else float(getattr(detection, "orientation", 0.0))
         axis = np.array([np.cos(yaw), np.sin(yaw), 0.0])
-        handle = position - axis * radius * 0.75
-        handle[2] = max(0.006, top - 0.004)
+        handle = position.copy()
+        handle[2] = max(0.006, top - 0.003)
         return GraspSpec(pos=handle, jaw=np.cross(UP, axis), width=0.013, lift=0.07,
                          approach_height=0.065, seat=0.0, label="utensil-handle")
     if detection.category == "tray":

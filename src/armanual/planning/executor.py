@@ -26,6 +26,7 @@ from armanual.control.primitives import Rendezvous
 from armanual.control.grasp import grasp_from_detection
 from armanual.control.gripper import pinch_offset
 from armanual.perception.detector import Detection, SceneObservation
+from armanual.perception.refine import WristRefiner
 from armanual.planning.planner import Plan, Planner, Step
 from armanual.task.grounding import Grounder
 from armanual.task.parser import parse_instruction
@@ -129,6 +130,9 @@ class ClosedLoopExecutor:
         self.max_steps = max_steps
         self.max_replans = max_replans
         self.step_budget = step_budget_seconds
+        # Eye-in-hand refinement: every pick re-localizes its target from the wrist camera at the
+        # pre-grasp hover, where the object is hundreds of pixels across instead of dozens.
+        self.refiner = WristRefiner(world)
         self.on_frame = []  # callbacks(world) invoked every control tick, for video capture
         self.scheduler.on_tick.append(lambda _t: [cb(world) for cb in self.on_frame])
 
@@ -161,7 +165,7 @@ class ClosedLoopExecutor:
                                              obj_yaw=_detection_yaw(detection))
                 result = self.scheduler.run(
                     {step.arm: _pick_then_place(self.world, step.arm, grasp, step.target_xy,
-                                                dt=self.dt)},
+                                                dt=self.dt, refiner=self.refiner)},
                     max_seconds=self.step_budget * 1.6,
                 )
             elif step.verb == "handoff":
@@ -187,7 +191,8 @@ class ClosedLoopExecutor:
     def _run_handoff(self, step: Step, grasp) -> object:
         """Pick with the giver, then run both arms together through the exchange."""
         pick = self.scheduler.run(
-            {step.giver: P.pick_detected(self.world, step.giver, grasp, dt=self.dt)},
+            {step.giver: P.pick_detected(self.world, step.giver, grasp, dt=self.dt,
+                                         refiner=self.refiner)},
             max_seconds=self.step_budget,
         )
         if not pick.ok:
@@ -213,7 +218,8 @@ class ClosedLoopExecutor:
             return RunResult(Status.FAILURE, 0.0, error="no bottle visible", kind="perception")
         grasp = grasp_from_detection(bottles[0], self.world.base_pos(step.arm)[:2])
         pick = self.scheduler.run(
-            {step.arm: P.pick_detected(self.world, step.arm, grasp, dt=self.dt)},
+            {step.arm: P.pick_detected(self.world, step.arm, grasp, dt=self.dt,
+                                       refiner=self.refiner)},
             max_seconds=self.step_budget,
         )
         if not pick.ok:
@@ -327,9 +333,9 @@ class ClosedLoopExecutor:
         return record
 
 
-def _pick_then_place(world, arm: str, grasp, target_xy, *, dt: float = 0.05):
+def _pick_then_place(world, arm: str, grasp, target_xy, *, dt: float = 0.05, refiner=None):
     """Composite skill: grasp a detected object, then place it at a table position."""
-    yield from P.pick_detected(world, arm, grasp, dt=dt)
+    yield from P.pick_detected(world, arm, grasp, dt=dt, refiner=refiner)
     yield from P.place_held(world, arm, target_xy, height=0.045, dt=dt, jaw=grasp.jaw,
                             tool_offset=pinch_offset(grasp.width))
 

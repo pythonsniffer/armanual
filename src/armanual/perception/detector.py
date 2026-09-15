@@ -103,6 +103,16 @@ class DetectorConfig:
     #: Footprint of fixed furniture (the drawer cabinet). Blobs centred here are labelled
     #: ``furniture`` instead of tableware — the cabinet is a landmark, not something to pick up.
     furniture_boxes: tuple[tuple[float, float, float, float], ...] = ()
+    #: Inside a furniture box, only blobs *taller* than this are furniture (the cabinet shell and
+    #: the drawer's own walls). Anything shorter is something lying in the drawer — which is the
+    #: whole point of opening it.
+    furniture_min_height: float = 0.026
+    #: Height slabs that replace the global "above the table" test inside a region, as
+    #: ``(cx, cy, half_x, half_y, z_min, z_max)``. The open drawer needs both bounds: its floor
+    #: sits ~10 mm up, so the lower bound cuts the floor away, and its side walls stand ~33 mm up,
+    #: so without an upper bound the cutlery merges with the walls into one tall blob and is
+    #: classified as furniture. Slicing the drawer at cutlery height separates them.
+    region_slabs: tuple[tuple[float, float, float, float, float, float], ...] = ()
 
 
 @dataclass
@@ -168,9 +178,15 @@ class TabletopDetector:
         rgb_f = rgb.astype(np.float32) / 255.0
 
         z = points[..., 2]
+        lower = np.full(z.shape, cfg.table_clearance, dtype=float)
+        upper = np.full(z.shape, cfg.max_height, dtype=float)
+        for cx, cy, hx, hy, z_min, z_max in cfg.region_slabs:
+            region = (np.abs(points[..., 0] - cx) < hx) & (np.abs(points[..., 1] - cy) < hy)
+            lower = np.where(region, z_min, lower)
+            upper = np.where(region, z_max, upper)
         on_table = (
-            (z > cfg.table_clearance)
-            & (z < cfg.max_height)
+            (z > lower)
+            & (z < upper)
             & (np.abs(points[..., 0]) < cfg.table_half_x)
             & (np.abs(points[..., 1] - cfg.table_center_y) < cfg.table_half_y)
         )
@@ -216,7 +232,8 @@ class TabletopDetector:
             color_name, color_conf = _nearest_color(mean_rgb)
             category = _classify(radius, top_z, elongation, color_name)
             for cx, cy, hx, hy in cfg.furniture_boxes:
-                if abs(centroid_xy[0] - cx) < hx and abs(centroid_xy[1] - cy) < hy:
+                inside = abs(centroid_xy[0] - cx) < hx and abs(centroid_xy[1] - cy) < hy
+                if inside and top_z > cfg.furniture_min_height:
                     category = "furniture"
                     break
             detections.append(

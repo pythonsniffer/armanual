@@ -111,13 +111,22 @@ class WristRefiner:
         self._renderers.clear()
 
 
-def refine_grasp(refiner: WristRefiner, arm: str, grasp, *, keep_height: bool = False):
-    """Return a copy of ``grasp`` shifted onto the wrist camera's closer look at the object.
+#: Grasps whose target point *is* the object's centroid, and which therefore benefit from a
+#: wrist-camera re-centring. A rim or handle grasp deliberately aims off-centre, so re-centring it
+#: on the object would move the jaws away from the feature they are supposed to close on — which
+#: is why refinement is opt-in per grasp type rather than applied to everything.
+CENTROID_GRASPS = ("utensil-handle", "cup-span", "bottle-neck")
 
-    The xy correction is always applied when the refinement is usable. The z is only taken from
-    the wrist view when asked for, because at close range a curved rim's apparent top varies more
-    than its position does.
+
+def refine_grasp(refiner: WristRefiner, arm: str, grasp, *, keep_height: bool = False):
+    """Return a copy of ``grasp`` re-centred on the wrist camera's closer look at the object.
+
+    Only applied to centroid-style grasps (see :data:`CENTROID_GRASPS`). For those, the overhead
+    view's blob is often partial — a utensil sliced at cutlery height inside a drawer shows only
+    part of its handle — and the close view recovers the rest.
     """
+    if grasp.label not in CENTROID_GRASPS:
+        return grasp, None
     from dataclasses import replace
 
     result = refiner.refine(arm, grasp.pos)
