@@ -29,16 +29,16 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from armanual.control.gripper import moving_jaw_z  # noqa: E402
-from armanual.control.kinematics import (  # noqa: E402
+from armanual.control.gripper import moving_jaw_z
+from armanual.control.kinematics import (
     colliding_pairs,
     hold_torque,
     holdable,
     solve_reach,
 )
-from armanual.paths import REPO_ROOT  # noqa: E402
-from armanual.sim.randomize import RandomizationConfig, sample_scene  # noqa: E402
-from armanual.sim.world import World  # noqa: E402
+from armanual.paths import REPO_ROOT
+from armanual.sim.randomize import RandomizationConfig, sample_scene
+from armanual.sim.world import World
 
 GRASP_HEIGHT = 0.05
 

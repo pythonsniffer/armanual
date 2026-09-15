@@ -25,7 +25,6 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from armanual.control.grasp import grasp_for
 from armanual.control.kinematics import PLANNING_OPENING, solve_reach
 from armanual.planning.place_setting import ROLE_CATEGORIES, SettingPlan, build_setting
 from armanual.task.schema import GroundedTask

@@ -19,7 +19,12 @@ import mujoco
 import numpy as np
 
 from armanual.perception.camera import CameraModel, camera_model
-from armanual.perception.detector import Detection, DetectorConfig, SceneObservation, TabletopDetector
+from armanual.perception.detector import (
+    Detection,
+    DetectorConfig,
+    SceneObservation,
+    TabletopDetector,
+)
 
 
 @dataclass

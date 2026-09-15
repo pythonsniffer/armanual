@@ -12,10 +12,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from armanual.perception.evaluate import aggregate, score_observation  # noqa: E402
-from armanual.perception.observer import CameraObserver  # noqa: E402
-from armanual.sim.randomize import RandomizationConfig, sample_scene  # noqa: E402
-from armanual.sim.world import World  # noqa: E402
+from armanual.perception.evaluate import aggregate, score_observation
+from armanual.perception.observer import CameraObserver
+from armanual.sim.randomize import RandomizationConfig, sample_scene
+from armanual.sim.world import World
 
 
 def main() -> None:

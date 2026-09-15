@@ -74,7 +74,7 @@ class RandomizationConfig:
     max_distractors: int = 3
 
     @classmethod
-    def off(cls) -> "RandomizationConfig":
+    def off(cls) -> RandomizationConfig:
         return cls(
             placement=False,
             sizes=False,
@@ -87,7 +87,7 @@ class RandomizationConfig:
         )
 
     @classmethod
-    def placement_only(cls) -> "RandomizationConfig":
+    def placement_only(cls) -> RandomizationConfig:
         return cls(
             sizes=False,
             colors=False,

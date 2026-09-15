@@ -26,12 +26,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from armanual.eval.video import OverlayState, VideoRecorder  # noqa: E402
-from armanual.perception.observer import CameraObserver  # noqa: E402
-from armanual.planning.subgoals import SubgoalRunner  # noqa: E402
-from armanual.policy.tasks import decompose  # noqa: E402
-from armanual.sim.randomize import RandomizationConfig, sample_scene  # noqa: E402
-from armanual.sim.world import World  # noqa: E402
+from armanual.eval.video import OverlayState, VideoRecorder
+from armanual.perception.observer import CameraObserver
+from armanual.planning.subgoals import SubgoalRunner
+from armanual.policy.tasks import decompose
+from armanual.sim.randomize import RandomizationConfig, sample_scene
+from armanual.sim.world import World
 
 
 def build_backend(args):

@@ -84,7 +84,7 @@ def solve_ik(
     step_scale: float = 0.6,
     seed: int | None = None,
     restarts: int = 4,
-    accept: "Callable[[np.ndarray], bool] | None" = None,
+    accept: Callable[[np.ndarray], bool] | None = None,
 ) -> IKResult:
     """Solve for joint angles putting ``site_id`` at ``target_pos`` (and near ``target_mat``).
 

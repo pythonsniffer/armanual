@@ -127,7 +127,7 @@ def main() -> None:
         # Only valid when the optimizer is configured from the CLI. With --policy.path the policy
         # brings its own optimizer config and LeRobot rejects the sub-flag, so raising the batch
         # size is the supported way to increase the effective batch here.
-        command.append(f"--optimizer.type=adamw")
+        command.append("--optimizer.type=adamw")
         command.append(f"--optimizer.grad_accumulation_steps={grad_accum}")
     command.extend(preset["extra"])
     if args.resume:

@@ -489,7 +489,7 @@ def place_held(world, arm: str, target_xy, *, height: float = 0.035, dt: float =
                                 steps=3, tolerance=0.04, label="post-place")
 
 
-def handoff_give(world, giver: str, meeting, width: float, sync: "Rendezvous",
+def handoff_give(world, giver: str, meeting, width: float, sync: Rendezvous,
                  *, dt: float = 0.05) -> Skill:
     """Giver half of a hand-off: present the held object at the meeting point, then let go."""
     meeting = np.asarray(meeting, dtype=float)
@@ -503,7 +503,7 @@ def handoff_give(world, giver: str, meeting, width: float, sync: "Rendezvous",
     yield from retreat(world, giver, height=0.10, duration=0.9, dt=dt)
 
 
-def handoff_take(world, receiver: str, meeting, width: float, sync: "Rendezvous",
+def handoff_take(world, receiver: str, meeting, width: float, sync: Rendezvous,
                  *, dt: float = 0.05) -> Skill:
     """Receiver half: wait for the object to be presented, close on it, take it away.
 

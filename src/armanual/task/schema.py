@@ -40,7 +40,7 @@ class Referent:
     color: str | None = None
     size: str | None = None
     relation: str | None = None
-    anchor: "Referent | None" = None
+    anchor: Referent | None = None
     ordinal: str | None = None  # "leftmost", "rightmost", "nearest", "farthest"
     #: Set when the user pointed instead of (or as well as) describing.
     pointing_xy: tuple[float, float] | None = None

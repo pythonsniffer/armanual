@@ -20,7 +20,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from armanual.policy.benchmark import (  # noqa: E402
+from armanual.policy.benchmark import (
     benchmark_ir,
     host_info,
     list_devices,

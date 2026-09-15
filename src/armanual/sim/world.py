@@ -288,7 +288,7 @@ class World:
             renderer.close()
         self._renderers.clear()
 
-    def __enter__(self) -> "World":
+    def __enter__(self) -> World:
         return self
 
     def __exit__(self, *exc) -> None:

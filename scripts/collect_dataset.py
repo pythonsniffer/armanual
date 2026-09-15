@@ -19,9 +19,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from armanual.policy.parallel import collect_parallel  # noqa: E402
-from armanual.policy.tasks import SKILLS  # noqa: E402
-from armanual.sim.randomize import RandomizationConfig  # noqa: E402
+from armanual.policy.parallel import collect_parallel
+from armanual.policy.tasks import SKILLS
+from armanual.sim.randomize import RandomizationConfig
 
 #: Object descriptions used in generated instructions, paired with where they may be sent.
 PLACE_TARGETS: tuple[tuple[str, str, bool], ...] = (

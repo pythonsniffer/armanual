@@ -14,8 +14,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from armanual.eval.harness import all_tasks, run_suite  # noqa: E402
-from armanual.eval.tiers import task_by_id, tasks_for_tier  # noqa: E402
+from armanual.eval.harness import all_tasks, run_suite
+from armanual.eval.tiers import task_by_id, tasks_for_tier
 
 
 def main() -> None:

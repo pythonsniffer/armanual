@@ -6,7 +6,11 @@ from pathlib import Path
 
 import numpy as np
 
-from armanual.modality.speech import OfflineTranscriber, SpeechmaticsTranscriber, transcribe_to_request
+from armanual.modality.speech import (
+    OfflineTranscriber,
+    SpeechmaticsTranscriber,
+    transcribe_to_request,
+)
 from armanual.perception.detector import Detection, SceneObservation
 from armanual.task.grounding import Grounder, ground_instruction
 from armanual.task.parser import parse_instruction

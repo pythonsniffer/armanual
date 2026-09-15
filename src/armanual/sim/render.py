@@ -33,7 +33,7 @@ def select_backend() -> str:
             with mujoco.Renderer(model, 32, 32) as renderer:
                 renderer.update_scene(mujoco.MjData(model))
                 renderer.render()
-        except Exception as exc:  # noqa: BLE001 - probing is expected to fail sometimes
+        except Exception as exc:
             if forced:
                 raise RuntimeError(f"MUJOCO_GL={forced!r} is not usable here: {exc}") from exc
             warnings.warn(f"GL backend {backend!r} unavailable: {exc}", stacklevel=2)

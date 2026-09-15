@@ -22,9 +22,9 @@ import numpy as np
 
 from armanual.control import primitives as P
 from armanual.control.executor import Scheduler, SkillFailure, Status
-from armanual.control.primitives import Rendezvous
 from armanual.control.grasp import grasp_from_detection
 from armanual.control.gripper import pinch_offset
+from armanual.control.primitives import Rendezvous
 from armanual.perception.detector import Detection, SceneObservation
 from armanual.perception.refine import WristRefiner
 from armanual.planning.planner import Plan, Planner, Step

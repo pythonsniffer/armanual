@@ -185,9 +185,7 @@ def collect_skill_episode(
     """
     from armanual.control import primitives as prim
     from armanual.control.executor import Scheduler
-    from armanual.control.grasp import grasp_from_detection
     from armanual.perception.refine import WristRefiner
-    from armanual.planning.subgoals import subgoal_target
 
     scene = sample_scene(seed, randomization or RandomizationConfig.placement_only())
     world = World(scene, fast_render=fast_render)

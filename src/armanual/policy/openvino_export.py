@@ -27,8 +27,6 @@ import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-import numpy as np
-
 #: Precisions we attempt, in the order a deployment would try them.
 PRECISIONS = ("fp32", "fp16", "int8")
 
