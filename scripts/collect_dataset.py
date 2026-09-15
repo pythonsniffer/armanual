@@ -39,18 +39,22 @@ PLACE_TARGETS: tuple[tuple[str, str, bool], ...] = (
 
 def instruction_plan(episodes_per_skill: int, rng: random.Random) -> list[tuple[str, str, bool]]:
     """Build the (instruction, skill, needs_open_drawer) list to record."""
+    # Weighted by what the workflow needs *and* what the expert can demonstrate. Placement is the
+    # workhorse skill and records reliably, so it gets the bulk; pouring is the expert's weakest
+    # skill (the bottle grasp succeeds ~3/4 at best), so spending a third of the collection budget
+    # on it would mostly buy failed episodes.
     plan: list[tuple[str, str, bool]] = []
-    for _ in range(episodes_per_skill):
+    for _ in range(max(1, episodes_per_skill // 2)):
         plan.append((rng.choice(SKILLS["open_drawer"].templates), "open_drawer", False))
-    for index in range(episodes_per_skill * 2):  # the workhorse skill gets twice the data
+    for index in range(episodes_per_skill * 3):
         description, where, needs_drawer = PLACE_TARGETS[index % len(PLACE_TARGETS)]
         template = rng.choice(SKILLS["place_object"].templates)
         plan.append((template.format(description=description, where=where), "place_object",
                      needs_drawer))
-    for _ in range(episodes_per_skill):
+    for _ in range(max(1, episodes_per_skill // 2)):
         template = rng.choice(SKILLS["pour"].templates)
         plan.append((template.format(description=rng.choice(("blue cup", "cup"))), "pour", False))
-    for _ in range(episodes_per_skill):
+    for _ in range(max(1, episodes_per_skill // 3)):
         template = rng.choice(SKILLS["handoff"].templates)
         plan.append((template.format(description=rng.choice(("cup", "plate"))), "handoff", False))
     rng.shuffle(plan)

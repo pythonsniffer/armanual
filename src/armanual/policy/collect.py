@@ -144,3 +144,167 @@ def collect_episode(
     observer.close()
     world.close()
     return episode
+
+
+def _best_arm(world, point, exclude: str | None = None) -> str | None:
+    """Arm that can reach a point most cheaply, or None when neither can."""
+    from armanual.control.kinematics import PLANNING_OPENING, solve_reach
+
+    best, best_cost = None, float("inf")
+    for arm in ARMS:
+        if arm == exclude:
+            continue
+        target = np.array([point[0], point[1], max(0.045, float(point[2]) if len(point) > 2 else 0.045)])
+        solution = solve_reach(world, arm, target, gripper=PLANNING_OPENING,
+                               ignore_geoms=world.movable_geom_ids())
+        if solution.feasible and solution.cost < best_cost:
+            best, best_cost = arm, solution.cost
+    return best
+
+
+def collect_skill_episode(
+    instruction: str,
+    seed: int,
+    *,
+    skill: str,
+    randomization: RandomizationConfig | None = None,
+    pre_open_drawer: bool = False,
+    image_size: tuple[int, int] = IMAGE_SIZE,
+    fast_render: bool = True,
+) -> DemoEpisode:
+    """Record one *skill* demonstration by driving the primitives directly.
+
+    The closed-loop planner is deliberately not in this path. It contributes failure modes that
+    teach the policy nothing — an empty plan, a hand-off inserted because a destination was a
+    centimetre out of reach — and every episode it loses is a training example lost. Grounding
+    still resolves the instruction against the cameras, so the language label means exactly what
+    it says; only the sequencing is taken out.
+
+    The planner remains in the loop at *evaluation* time, where its decisions are what is being
+    measured.
+    """
+    from armanual.control import primitives as prim
+    from armanual.control.executor import Scheduler
+    from armanual.control.grasp import grasp_from_detection
+    from armanual.perception.refine import WristRefiner
+    from armanual.planning.subgoals import subgoal_target
+
+    scene = sample_scene(seed, randomization or RandomizationConfig.placement_only())
+    world = World(scene, fast_render=fast_render)
+    observer = CameraObserver(world)
+    episode = DemoEpisode(task=instruction, seed=seed, skill=skill)
+    recorder = BimanualRecorder(world, size=image_size)
+    scheduler = Scheduler(world, dt=0.05)
+
+    try:
+        if pre_open_drawer:
+            arm = "left" if world.scene.drawer.pos[0] < 0 else "right"
+            scheduler.run({arm: prim.open_drawer(world, arm)}, max_seconds=45)
+            scheduler.run({arm: prim.home(world, arm)}, max_seconds=10)
+
+        scheduler.on_tick.append(recorder.capture)
+        refiner = WristRefiner(world)
+
+        if skill == "open_drawer":
+            arm = "left" if world.scene.drawer.pos[0] < 0 else "right"
+            result = scheduler.run({arm: prim.open_drawer(world, arm)}, max_seconds=45)
+            episode.success = result.ok and world.drawer_opening() >= world.scene.drawer.open_threshold
+            episode.notes = result.error or ""
+        elif skill == "pour":
+            episode.success, episode.notes = _record_pour(world, observer, scheduler, refiner)
+        else:
+            episode.success, episode.notes = _record_place(
+                world, observer, scheduler, refiner, instruction
+            )
+    except Exception as exc:  # noqa: BLE001 - a failed demo is data about the expert, not a crash
+        episode.success, episode.notes = False, f"{type(exc).__name__}: {exc}"
+
+    episode.frames = recorder.frames
+    observer.close()
+    world.close()
+    return episode
+
+
+def _record_place(world, observer, scheduler, refiner, instruction: str) -> tuple[bool, str]:
+    """Pick the object the sentence refers to and put it where the sentence says."""
+    from armanual.control import primitives as prim
+    from armanual.control.grasp import grasp_from_detection
+    from armanual.planning.subgoals import subgoal_target
+
+    category, target_xy = subgoal_target(world, observer, instruction)
+    if target_xy is None:
+        return False, "instruction has no resolvable destination"
+
+    observation = observer.observe()
+    candidates = [
+        d for d in observation.detections
+        if d.category not in ("furniture", "unknown")
+        and (category in (None, "") or d.category == category)
+    ]
+    if not candidates:
+        return False, f"no {category or 'object'} detected"
+    detection = max(candidates, key=lambda d: d.pixel_area)
+
+    arm = _best_arm(world, detection.position)
+    if arm is None:
+        return False, "object out of reach of both arms"
+    grasp = grasp_from_detection(detection, world.base_pos(arm)[:2],
+                                 obj_yaw=float(detection.orientation))
+    result = scheduler.run(
+        {arm: prim.pick_detected(world, arm, grasp, refiner=refiner, attempts=2)},
+        max_seconds=40,
+    )
+    if not result.ok:
+        return False, result.error or "pick failed"
+
+    offset = grasp.pos[:2] - detection.position[:2]
+    place_xy = (float(target_xy[0] + offset[0]), float(target_xy[1] + offset[1]))
+    result = scheduler.run(
+        {arm: prim.place_held(world, arm, place_xy, height=0.045, jaw=grasp.jaw)},
+        max_seconds=35,
+    )
+    if not result.ok:
+        return False, result.error or "place failed"
+
+    after = observer.observe()
+    near = [
+        d for d in after.detections
+        if float(np.linalg.norm(d.position[:2] - np.asarray(target_xy))) < 0.07
+    ]
+    return bool(near), "" if near else "object did not end up at the destination"
+
+
+def _record_pour(world, observer, scheduler, refiner) -> tuple[bool, str]:
+    """One arm steadies the cup while the other tips the bottle over it."""
+    from armanual.control import primitives as prim
+    from armanual.control.grasp import grasp_from_detection
+    from armanual.eval.harness import count_liquid_in_cups
+
+    observation = observer.observe()
+    bottles = sorted((d for d in observation.detections if d.category == "bottle"),
+                     key=lambda d: (-d.confidence, -d.pixel_area))
+    cups = [d for d in observation.detections if d.category == "cup"]
+    if not bottles or not cups:
+        return False, "pour needs a visible bottle and cup"
+    bottle, cup = bottles[0], max(cups, key=lambda d: d.pixel_area)
+
+    pour_arm = _best_arm(world, bottle.position)
+    if pour_arm is None:
+        return False, "bottle out of reach"
+    hold_arm = next((a for a in ARMS if a != pour_arm), None)
+
+    grasp = grasp_from_detection(bottle, world.base_pos(pour_arm)[:2])
+    result = scheduler.run(
+        {pour_arm: prim.pick_detected(world, pour_arm, grasp, refiner=refiner, attempts=2)},
+        max_seconds=40,
+    )
+    if not result.ok:
+        return False, result.error or "bottle pick failed"
+
+    skills = {pour_arm: prim.pour_over(world, pour_arm, cup.position)}
+    if hold_arm and _best_arm(world, cup.position, exclude=pour_arm) == hold_arm:
+        hold_grasp = grasp_from_detection(cup, world.base_pos(hold_arm)[:2])
+        skills[hold_arm] = prim.steady_and_hold(world, hold_arm, hold_grasp, seconds=9.0)
+    result = scheduler.run(skills, max_seconds=60)
+    inside = count_liquid_in_cups(world)
+    return inside >= 1, "" if inside else f"no liquid landed in a cup ({result.error or 'pour missed'})"

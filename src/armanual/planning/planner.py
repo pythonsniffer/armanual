@@ -128,7 +128,8 @@ class Planner:
         return ArmCost(arm, True, solution.cost + 0.6 * travel, f"tilt={solution.tilt}")
 
     def assign_arm(self, pick_xy, place_xy, *, hint: str | None = None,
-                   payload: float = 0.0) -> tuple[str | None, str | None, str]:
+                   payload: float = 0.0,
+                   pick_height: float | None = None) -> tuple[str | None, str | None, str]:
         """Choose the arm(s) for a pick-and-place.
 
         Returns ``(arm, other_arm_for_handoff, note)``. When a single arm can do the whole step,
@@ -136,7 +137,14 @@ class Planner:
         are returned and the caller inserts a hand-off.
         """
         arms = list(self.world.arms)
-        pick = {arm: self.reach_cost(arm, pick_xy, payload=payload) for arm in arms}
+        # Check the pick at the height the gripper will actually hover at. A cup is grasped ~10 cm
+        # above the table and a plate ~2 cm, and the arm's reachable envelope shrinks with height —
+        # checking both at one nominal height is how a plan ends up commanding a pose the
+        # controller then rejects as unreachable.
+        pick_point = (
+            (pick_xy[0], pick_xy[1], pick_height) if pick_height is not None else pick_xy
+        )
+        pick = {arm: self.reach_cost(arm, pick_point, payload=payload) for arm in arms}
         place = {arm: self.reach_cost(arm, place_xy, payload=payload) for arm in arms}
 
         whole = {
@@ -170,8 +178,10 @@ class Planner:
         return f"{prefix}{self._counter}"
 
     def _pick_place_steps(self, object_name: str, pick_xy, place_xy, *, role: str = "",
-                          hint: str | None = None, requires: tuple[str, ...] = ()) -> list[Step]:
-        arm, receiver, note = self.assign_arm(pick_xy, place_xy, hint=hint)
+                          hint: str | None = None, requires: tuple[str, ...] = (),
+                          pick_height: float | None = None) -> list[Step]:
+        arm, receiver, note = self.assign_arm(pick_xy, place_xy, hint=hint,
+                                              pick_height=pick_height)
         pick_point = (float(pick_xy[0]), float(pick_xy[1]))
         if arm is None:
             return []
@@ -263,6 +273,7 @@ class Planner:
                     hint=action.spec.arm_hint,
                     role=_role_for_category(action.target.category),
                     requires=tuple(s.step_id for s in steps),
+                    pick_height=float(action.target.position[2]) + 0.07,
                 )
                 if not steps:
                     plan.unplaceable.append(action.target.name or action.target.referent.describe())
@@ -372,6 +383,7 @@ class Planner:
                 target_xy,
                 role=slot.role,
                 requires=tuple(s.step_id for s in steps if s.verb == "open_drawer"),
+                pick_height=float(choice.height) + 0.07,
             )
             if not made:
                 plan.unplaceable.append(slot.role)

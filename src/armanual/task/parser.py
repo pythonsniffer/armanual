@@ -236,7 +236,13 @@ def parse_clause(clause: str, previous_target: Referent | None = None) -> Action
     if verb == "open_drawer":
         return ActionSpec(verb="open_drawer", arm_hint=arm_hint)
 
-    object_phrase, destination_phrase = _split_clause(clause)
+    if verb == "pick":
+        # "pick up the cup on the left" has no destination, so the whole phrase describes the
+        # object. Splitting it at the relation would hand "on the left" to a destination the verb
+        # does not have, and the location would simply be lost.
+        object_phrase, destination_phrase = clause, ""
+    else:
+        object_phrase, destination_phrase = _split_clause(clause)
     target = parse_referent(object_phrase)
     is_pronoun = any(re.search(rf"\b{word}\b", object_phrase) for word in PRONOUNS)
     if target.is_empty and previous_target is not None and (is_pronoun or not object_phrase.strip()):
