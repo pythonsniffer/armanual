@@ -77,6 +77,23 @@ def _encode(episode, quality: int = 92) -> EncodedEpisode:
     )
 
 
+def _trim_memory() -> None:
+    """Hand freed memory back to the OS after an episode.
+
+    The software rasterizer allocates large framebuffers per episode. Freeing them returns the
+    memory to glibc's arenas but not to the kernel, so a worker's RSS climbs across episodes even
+    though nothing is leaked in the Python sense — about 0.1 GB per five minutes here, which is
+    enough to reach the OOM killer part way through a long collection pass. ``malloc_trim``
+    releases the arena tops; it is a no-op where it is unavailable.
+    """
+    try:
+        import ctypes
+
+        ctypes.CDLL("libc.so.6").malloc_trim(0)
+    except Exception:  # noqa: BLE001 - a missing or non-glibc libc is not an error here
+        pass
+
+
 def _worker(job: dict) -> EncodedEpisode | None:
     """Run one episode in this process and return it encoded."""
     import warnings
@@ -111,18 +128,29 @@ def _worker(job: dict) -> EncodedEpisode | None:
         return EncodedEpisode(task=job["instruction"], seed=job["seed"], skill=job["skill"],
                               success=False, notes=f"worker error: {exc}", frames=[])
     if not len(episode):
+        _trim_memory()
         return None
-    return _encode(episode)
+    encoded = _encode(episode)
+    _trim_memory()
+    return encoded
 
 
-def collect_parallel(jobs: list[dict], workers: int = 8, chunksize: int = 1):
+#: Episodes a collection worker runs before it is retired and replaced. Even with
+#: :func:`_trim_memory`, a worker's footprint drifts upward across episodes; recycling bounds it.
+#: Startup costs a couple of seconds against roughly twenty minutes of work, so it is close to
+#: free, and it turns "the collection pass died at episode 200" into "a worker restarted".
+MAX_EPISODES_PER_WORKER = 25
+
+
+def collect_parallel(jobs: list[dict], workers: int = 8, chunksize: int = 1,
+                     max_tasks_per_child: int = MAX_EPISODES_PER_WORKER):
     """Yield encoded episodes as workers finish them.
 
     Uses ``spawn`` rather than ``fork``: MuJoCo's GL context does not survive a fork, and a forked
     child inherits a broken one that fails on first render.
     """
     context = mp.get_context("spawn")
-    with context.Pool(processes=workers) as pool:
+    with context.Pool(processes=workers, maxtasksperchild=max_tasks_per_child) as pool:
         for result in pool.imap_unordered(_worker, jobs, chunksize=chunksize):
             if result is not None:
                 yield result
