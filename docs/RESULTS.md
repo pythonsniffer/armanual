@@ -62,14 +62,14 @@ per tier):
 | Tier | Episodes | Task success | Criterion score | Subtask success |
 | --- | --- | --- | --- | --- |
 | 1 — placement | 20 | 0.75 | 0.75 | 0.59 |
-| 2 — disambiguation | 20 | 0.85 | 0.85 | 0.66 |
+| 2 — disambiguation | 20 | 0.70 | 0.70 | 0.66 |
 | 3 — drawer dependency | 10 | 0.00 | 0.40 | 0.10 |
-| 4 — pour + hand-off | 20 | 0.30 | 0.30 | 0.17 |
-| 5 — full randomization | 20 | 0.25 | 0.47 | 0.41 |
-| 6 — hero / style | 20 | 0.25 | 0.41 | 0.39 |
-| **all** | **110** | **0.436** | **0.543** | **0.412** |
+| 4 — pour + hand-off | 20 | 0.35 | 0.35 | 0.14 |
+| 5 — full randomization | 20 | 0.20 | 0.47 | 0.40 |
+| 6 — hero / style | 20 | 0.30 | 0.46 | 0.38 |
+| **all** | **110** | **0.418** | **0.534** | **0.402** |
 
-Failure attribution: reachability 53, grasp 39, manipulation 15, placement 10.
+Failure attribution: reachability 54, grasp 39, manipulation 15, placement 9.
 
 Reachability dominates, which is the honest consequence of a 0.14–0.34 m workspace: the IK
 *refuses* poses whose shoulder torque exceeds 2.94 N·m rather than attempting them and sagging.
@@ -121,14 +121,56 @@ shared libraries, which this repo installs into `.venv/ffmpeg` via conda.
 ## 6. Policy versus analytical controller
 
 ```bash
-python scripts/evaluate.py --policy <checkpoint> --seeds 10 --out outputs/eval_policy
-python scripts/evaluate.py --policy <checkpoint> --no-fallback --seeds 10   # policy alone
+python scripts/evaluate.py --seeds 10 --workers 4 --out outputs/eval_baseline
+python scripts/evaluate.py --seeds 10 --workers 3 --policy <ckpt> --out outputs/eval_policy_final
 ```
 
-The deployed system is **pure VLA**: every joint command comes from the policy and nothing rescues
-a failed subgoal. Two columns are reported on the same tasks and seeds — the analytical baseline
-(what the demonstration generator achieves) and the policy — so the gap between them is visible
-rather than papered over.
+The deployed system is **pure VLA**: every joint command comes from SmolVLA and nothing rescues a
+failed subgoal. Both columns are the same 11 tasks × 10 seeds, the same scenes and the same
+scoring, so the gap is visible rather than papered over.
+
+| Tier | Episodes | Analytical baseline | **Pure VLA** |
+| --- | --- | --- | --- |
+| 1 — placement | 20 | 0.75 | 0.05 |
+| 2 — disambiguation | 20 | 0.70 | 0.10 |
+| 3 — drawer dependency | 10 | 0.00 | 0.00 |
+| 4 — pour + hand-off | 20 | 0.35 | 0.00 |
+| 5 — full randomization | 20 | 0.20 | 0.00 |
+| 6 — hero / style | 20 | 0.30 | 0.00 |
+| **all** | **110** | **0.418** | **0.027** |
+
+Criterion score: 0.534 baseline vs 0.045 policy.
+Every policy failure is attributed to `policy` — by construction, since there is no fallback to
+attribute anything else to.
+
+**The policy is far behind the expert that taught it.** 0.027 against 0.418 is the honest headline
+and it is reported as measured. What the policy does do, it does unaided: three of its successes
+are cup placements and colour-grounded selections in tiers 1–2, executed end to end from pixels
+and a sentence.
+
+### A benchmark bug found while reading these results, and fixed
+
+The first pass of this table showed the policy at 0.073 with tier 2 at 0.35. Reading the episode
+records rather than the summary showed that in four of those seven tier-2 passes the robot had
+moved **the wrong cup** — `cup_distract` when the instruction said "the blue cup", or the
+right-hand cup when it said "the cup on the left". The `object_moved` criterion checked only that
+*some* cup of the right category had moved, while its own description claimed "the *blue* cup
+moved, not the navy one". A disambiguation tier that does not check which object was chosen is not
+testing disambiguation.
+
+`SuccessCriterion` now takes `object_color` or `object_ordinal`, resolved against the scene's
+starting state so it holds under randomization rather than pinning an object name. The effect on
+both controllers, same seeds either side:
+
+| | Before fix | After fix |
+| --- | --- | --- |
+| Analytical baseline, tier 2 | 0.85 | **0.70** |
+| Analytical baseline, overall | 0.436 | **0.418** |
+| Pure VLA, tier 2 | 0.35 | **0.10** |
+| Pure VLA, overall | 0.073 | **0.027** |
+
+It cost both controllers, which is the point: the bug was inflating the benchmark, not favouring
+one side. The pre-fix results are kept beside the corrected ones as `results_PRE_FIX.json`.
 
 ### Policy-only progress, and what actually limits it
 
