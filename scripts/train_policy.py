@@ -17,6 +17,16 @@ Memory notes for an 8 GB card (RTX 5050 and similar):
   ``--policy.path`` the policy supplies its own, so increase ``--batch-size`` instead.
 * If you still hit an out-of-memory error, halve ``--batch-size`` and double
   ``--grad-accum`` before touching anything else — that trade is free apart from wall-clock.
+
+**``--image-size`` must be a multiple of 64.** SmolVLM2's vision tower cuts the image into 16-pixel
+patches and its connector then pixel-shuffles them 4x, so the side length has to survive division
+by 16 and then by 4. 256 and 192 are fine. The dataset's native 224 is *not*, and the failure is
+not a helpful one — it surfaces deep inside the connector as::
+
+    RuntimeError: shape '[16, 14, 3, 3072]' is invalid for input of size 2408448
+
+which looks like a batch problem and is really an image-size problem. The argument is restricted
+to valid sizes so that mistake cannot be made twice.
 """
 
 from __future__ import annotations
@@ -83,10 +93,11 @@ def main() -> None:
     parser.add_argument("--job-name", default=None)
     parser.add_argument("--wandb", action="store_true")
     parser.add_argument("--resume", action="store_true")
-    parser.add_argument("--image-size", type=int, default=256,
+    parser.add_argument("--image-size", type=int, default=256, choices=[192, 256, 320, 384, 512],
                         help="what the policy resizes camera frames to. Smaller means fewer "
                              "vision tokens: faster steps and less memory, at some spatial "
-                             "precision. 224 and 192 both train comfortably in 8 GB")
+                             "precision. Must be a multiple of 64 (see note below); 192 and 256 "
+                             "both train comfortably in 8 GB")
     parser.add_argument("--num-workers", type=int, default=2, dest="num_workers",
                         help="dataloader workers; each one decodes video, so keep it modest on a "
                              "memory-constrained machine")
