@@ -121,9 +121,9 @@ class LeRobotBackend:
         if hasattr(self.policy, "reset"):
             self.policy.reset()
 
-    def predict(self, images: dict[str, np.ndarray], state: np.ndarray, task: str) -> np.ndarray:
+    def _batch(self, images: dict[str, np.ndarray], state: np.ndarray, task: str) -> dict:
+        """Unbatched tensors under the *dataset's* key names; the pipeline batches and renames."""
         torch = self.torch
-        # Unbatched tensors with the *dataset's* key names: the pipeline batches and renames.
         batch = {
             key: torch.from_numpy(np.ascontiguousarray(images[key])).permute(2, 0, 1).to(
                 torch.float32
@@ -133,7 +133,11 @@ class LeRobotBackend:
         }
         batch["observation.state"] = torch.from_numpy(np.asarray(state, dtype=np.float32))
         batch["task"] = task
+        return batch
 
+    def predict(self, images: dict[str, np.ndarray], state: np.ndarray, task: str) -> np.ndarray:
+        torch = self.torch
+        batch = self._batch(images, state, task)
         started = time.perf_counter()
         with torch.inference_mode():
             processed = self.preprocessor(batch)
@@ -144,6 +148,31 @@ class LeRobotBackend:
         self.stats.record((time.perf_counter() - started) * 1000)
         action = action.detach().to("cpu").to(torch.float32).numpy()
         return action.reshape(-1, self.action_dim)
+
+    def predict_chunk(self, images: dict[str, np.ndarray], state: np.ndarray,
+                      task: str) -> np.ndarray:
+        """The whole action chunk in one call, rather than one action at a time.
+
+        ``select_action`` returns a *single* action and keeps the rest of the chunk in a queue
+        inside the policy, refilling it by running the network every ``n_action_steps`` ticks.
+        That is efficient for the network but not for the caller: a runner that gets one action
+        back has to re-observe every tick, and under this project's CPU renderer three camera
+        frames cost ~290 ms — so 50 ticks of a 50-step chunk render 150 frames to feed one
+        inference. Asking for the chunk directly makes observation cost track inference cost,
+        which is the difference between a six-minute evaluation episode and a twenty-second one.
+        """
+        torch = self.torch
+        batch = self._batch(images, state, task)
+        started = time.perf_counter()
+        with torch.inference_mode():
+            processed = self.preprocessor(batch)
+            chunk = self.policy.predict_action_chunk(processed)
+            chunk = self.postprocessor(chunk)
+        if self.device.type == "cuda":
+            torch.cuda.synchronize()
+        self.stats.record((time.perf_counter() - started) * 1000)
+        chunk = chunk.detach().to("cpu").to(torch.float32).numpy()
+        return chunk.reshape(-1, self.action_dim)
 
 
 class ScriptedBackend:
@@ -194,6 +223,16 @@ class PolicyRunner:
             state.append([self.world.gripper_opening(arm)])
         return images, np.concatenate(state).astype(np.float32)
 
+    def ask(self, images, state, task: str) -> np.ndarray:
+        """One inference, returning as many actions as the backend will give.
+
+        A backend that exposes ``predict_chunk`` hands back the whole horizon, so the runner
+        re-observes once per chunk instead of once per tick — the cameras are the expensive part
+        of this loop, not the network.
+        """
+        ask = getattr(self.backend, "predict_chunk", None) or self.backend.predict
+        return ask(images, state, task)
+
     def apply(self, action: np.ndarray) -> None:
         """Send one 12-dim action to both arms."""
         action = np.asarray(action, dtype=float).reshape(-1)
@@ -216,7 +255,7 @@ class PolicyRunner:
         while self.world.time - started < max_seconds:
             if chunk is None or cursor >= len(chunk):
                 images, state = self.observation()
-                chunk = self.backend.predict(images, state, task)
+                chunk = self.ask(images, state, task)
                 limit = self.chunk_reuse or max(1, len(chunk) // 2)
                 chunk = chunk[:limit]
                 cursor = 0
