@@ -72,7 +72,7 @@ tests/          fast unit tests (language, grounding) and slower simulation test
 | Check the environment | `python -m armanual.cli verify` |
 | Render the scene | `python -m armanual.cli scene --seed 3 --randomize` |
 | Run one instruction | `python scripts/run_task.py --instruction "set the table"` |
-| Benchmark suite (tiers 1–6) | `python scripts/evaluate.py --seeds 10 --out outputs/eval` |
+| Benchmark suite (tiers 1–6) | `python scripts/evaluate.py --seeds 10 --workers 6 --out outputs/eval` |
 | Perception accuracy | `python scripts/eval_perception.py --seeds 10` |
 | Re-measure the workspace | `python scripts/measure_workspace.py` |
 | Collect demonstrations | `python scripts/collect_dataset.py --episodes-per-skill 60 --workers 6` |

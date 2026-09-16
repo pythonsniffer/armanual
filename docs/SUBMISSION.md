@@ -22,7 +22,7 @@ The challenge names five required deliverables. This is where each one lives and
 - Determinism is tested: `pytest tests/test_simulation.py -k deterministic`.
 
 ```bash
-python scripts/evaluate.py --seeds 10 --out outputs/eval    # results.json + results.csv
+python scripts/evaluate.py --seeds 10 --workers 6 --out outputs/eval   # results.json + results.csv
 ```
 
 ## 3. Intel inference benchmark script
@@ -64,7 +64,7 @@ python -m armanual.cli verify            # environment, end to end
 pytest tests/ -q                         # unit + simulation tests
 python scripts/measure_workspace.py      # regenerate measured docs
 python scripts/eval_perception.py --seeds 10 --json outputs/perception.json
-python scripts/evaluate.py --seeds 10 --out outputs/eval
+python scripts/evaluate.py --seeds 10 --workers 6 --out outputs/eval
 git status --short                       # no stray artifacts, no secrets
 ```
 
