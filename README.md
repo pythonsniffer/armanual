@@ -83,7 +83,7 @@ tests/          fast unit tests (language, grounding) and slower simulation test
 | Perception accuracy | `python scripts/eval_perception.py --seeds 10` |
 | Re-measure the workspace | `python scripts/measure_workspace.py` |
 | Collect demonstrations | `python scripts/collect_dataset.py --episodes-per-skill 60 --workers 6` |
-| Fine-tune SmolVLA | `python scripts/train_policy.py --policy smolvla --steps 20000` |
+| Fine-tune SmolVLA | `python scripts/train_policy.py --policy smolvla --steps 30000` |
 | Intel devices | `python scripts/benchmark_intel.py --list-devices` |
 | Intel benchmark | `python scripts/benchmark_intel.py --checkpoint <ckpt> --export --devices CPU GPU NPU` |
 | Tests | `pytest tests/ -q` |

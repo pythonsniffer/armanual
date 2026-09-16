@@ -102,7 +102,7 @@ dataset threefold. Evaluation uses the full randomization.
 ## 5. Policy training
 
 ```bash
-python scripts/train_policy.py --policy smolvla --steps 20000
+python scripts/train_policy.py --policy smolvla --steps 30000 --image-size 256
 ```
 
 | | |

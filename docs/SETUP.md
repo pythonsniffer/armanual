@@ -105,8 +105,9 @@ then `wsl --shutdown`. Note this restarts the WSL instance and kills anything ru
 # 1. demonstrations (~50 min at 6 workers for ~140 successful episodes)
 python scripts/collect_dataset.py --episodes-per-skill 60 --workers 6
 
-# 2. fine-tune SmolVLA (~75 min for 20k steps on an 8 GB laptop GPU)
-python scripts/train_policy.py --policy smolvla --steps 20000
+# 2. fine-tune SmolVLA (~4 h for 30k steps on an 8 GB laptop GPU; the card throttles from
+#    ~0.35 s/step to ~0.54 s/step over a long run, so budget for the slower figure)
+python scripts/train_policy.py --policy smolvla --steps 30000
 
 # 3. evaluate: analytical baseline, then the policy, on the same seeds
 python scripts/evaluate.py --seeds 10 --out outputs/eval
