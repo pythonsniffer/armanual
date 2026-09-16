@@ -43,11 +43,17 @@ def main() -> None:
     if args.limit:
         episodes = range(min(args.limit, source.num_episodes))
 
+    # LeRobotDataset v3.0 keeps each episode's frame range in the episode metadata table rather
+    # than in an `episode_data_index` attribute, which earlier versions exposed on the dataset.
+    episode_meta = source.meta.episodes
+
     merged_frames = 0
     for episode_index in episodes:
-        start = int(source.episode_data_index["from"][episode_index])
-        end = int(source.episode_data_index["to"][episode_index])
-        task = None
+        row = episode_meta[int(episode_index)]
+        start = int(row["dataset_from_index"])
+        end = int(row["dataset_to_index"])
+        tasks = row.get("tasks") or []
+        task = tasks[0] if isinstance(tasks, list) and tasks else (tasks or None)
         for frame_index in range(start, end):
             item = source[frame_index]
             task = item.get("task", task)
