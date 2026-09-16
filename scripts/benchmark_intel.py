@@ -109,7 +109,8 @@ def _precision_of(ir_path: Path, precisions: list[str]) -> str:
     if report_path.exists():
         try:
             report = json.loads(report_path.read_text())
-            for entry in report.get("converted", []) + report.get("components", []):
+            # "components" holds the per-component dicts; "converted" is just a list of names.
+            for entry in report.get("components", []):
                 if entry.get("name") == ir_path.stem and entry.get("precision"):
                     return entry["precision"]
         except (OSError, ValueError):

@@ -250,34 +250,44 @@ python scripts/benchmark_intel.py --checkpoint <ckpt> --export --precisions fp16
     --devices CPU GPU NPU --out outputs/benchmarks/core_ultra.json
 ```
 
-**The export and benchmark chain is proven end to end**, measured on the development machine
-(AMD Ryzen 7 250, OpenVINO 2026.3.1, CPU plugin only — `is_intel_core_ultra: false`):
+**The export and benchmark chain is proven end to end** on the final checkpoint, measured on the
+development machine (AMD Ryzen 7 250 w/ Radeon 780M Graphics, OpenVINO
+2026.3.1, CPU plugin only — `is_intel_core_ultra: false`):
 
-| Component | Precision | Size | Compile | Warm-up | p50 | Throughput |
-| --- | --- | --- | --- | --- | --- | --- |
-| SmolVLA vision tower (86.4 M params) | fp16 | 173.4 MB | 0.5 s | 170 ms | **60.3 ms** | 16.6 Hz |
-| SmolVLA vision tower | INT8 (NNCF) | **87.9 MB** | 0.5 s | — | **35.2 ms** | 28.4 Hz |
-| SmolVLA vision connector (11.8 M) | fp16 | 23.6 MB | — | — | **0.95 ms** | ~1050 Hz |
-| SmolVLA action expert (98.2 M) | — | did not convert | — | — | — | — |
+| Component | Params | Precision | Size | p50 | Throughput |
+| --- | --- | --- | --- | --- | --- |
+| SmolVLA vision tower | 86.4 M | fp16 | 173.4 MB | **47.3 ms** | 20.8 Hz |
+| SmolVLA vision tower | 86.4 M | **INT8 (NNCF)** | **87.9 MB** | **27.9 ms** | 35.7 Hz |
+| SmolVLA vision connector | 11.8 M | fp16 | 23.6 MB | 0.61 ms | 1610 Hz |
+| SmolVLA action expert | 98.2 M | — | did not convert | — | — |
+
+INT8 gives **1.97x smaller and 1.70x faster** on the same graph, calibrated on 48 frames
+rendered from the robot's own three cameras rather than a generic image corpus.
 
 The action expert is a Llama stack and `torch.jit.trace` fails on it (`unordered_map::at`), with
 `use_cache=False` and eager attention both tried. It stays on PyTorch, and that is reported rather
 than worked around — see [INTEL.md](INTEL.md) for the full component table.
 
-INT8 gives **1.97× smaller and 1.71× faster** on the same graph, calibrated on frames rendered
-from the robot's own three cameras rather than a generic image corpus.
+### An INT8 number that was not INT8
+
+The first run of this table reported INT8 at 51.2 ms against fp16's 56.3 ms — a suspiciously small
+1.10x — and the two `.bin` files were byte-for-byte the same size. They were the same model.
+`export_policy` falls back to fp16 when INT8 is requested without calibration data, and says so in
+its report; `scripts/benchmark_intel.py` never supplied any, and labelled the result by the
+directory it came from. The exporter was honest and the benchmark was not listening.
+
+Two changes: the benchmark now renders a calibration set before an INT8 export, and
+`_precision_of` reads the precision each component *actually* ended up as out of the export report
+instead of trusting the directory name. The vision connector in the INT8 directory is still fp16 —
+no calibration was supplied for it — and the table above now says so instead of calling it INT8.
 
 Why this matters for device placement: the vision tower runs **once per camera**, and the policy
-uses three. At 60 ms each that is ~180 ms of vision per inference on a CPU — the single largest
-term in the loop, and precisely the workload an iGPU or NPU exists to absorb.
+uses three. At 47 ms each that is ~142 ms of vision per inference on this CPU — the
+single largest term in the loop, and precisely the workload an iGPU or NPU exists to absorb.
 
 *The Core Ultra figures are pending access to the target machine.* The harness runs anywhere and
 stamps `is_intel_core_ultra` into every results file, so a development-machine measurement can
 never be mistaken for a target-hardware one.
-
-What will be reported: per component (vision tower, action expert) × per device (CPU/iGPU/NPU) ×
-per precision (fp32/fp16/INT8): compile time, warm-up latency, steady-state p50/p95/max,
-throughput, model size — plus task success on the same seeds before and after optimization.
 
 ## 8. Reproducing any of this
 
