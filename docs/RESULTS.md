@@ -148,6 +148,27 @@ and it is reported as measured. What the policy does do, it does unaided: three 
 are cup placements and colour-grounded selections in tiers 1–2, executed end to end from pixels
 and a sentence.
 
+### What the policy can actually do, at subgoal level
+
+Task success is an `all` over three to five subgoals, so a policy that does most of a task still
+scores zero. The subgoal record from the same 110 episodes is the more useful diagnostic:
+
+| Subgoal | Attempts | Succeeded | Rate |
+| --- | --- | --- | --- |
+| open the drawer | 50 | 16 | **0.32** |
+| place or pick a cup | 80 | 11 | 0.14 |
+| place a plate | 50 | 2 | 0.04 |
+| place cutlery | 30 | 0 | 0.00 |
+| pour | 20 | 0 | 0.00 |
+| **all** | **230** | **29** | **0.126** |
+
+Opening the drawer is the standout: a multi-second, contact-rich manipulation that the policy
+performs unaided roughly a third of the time, from pixels and the sentence "open the drawer". It is
+also the subgoal with the least geometric precision required — the criterion asks for 70 mm of
+travel on a graspable bar, not a 9 mm plate rim placed inside a 60 mm tolerance. The ordering of
+this table tracks required precision almost exactly, which is the clearest statement of where the
+policy currently stands: it has learned the *motions*, not the *millimetres*.
+
 ### A benchmark bug found while reading these results, and fixed
 
 The first pass of this table showed the policy at 0.073 with tier 2 at 0.35. Reading the episode
