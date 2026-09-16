@@ -41,6 +41,8 @@ def main() -> None:
     parser.add_argument("--devices", nargs="*", default=None,
                         help=f"default: every available device among {DEFAULT_DEVICES}")
     parser.add_argument("--precisions", nargs="*", default=["fp16"])
+    parser.add_argument("--calibration-frames", type=int, default=48,
+                        help="simulator frames used to calibrate INT8 quantization")
     parser.add_argument("--iterations", type=int, default=200)
     parser.add_argument("--out", type=Path, default=Path("outputs/benchmarks/intel_benchmark.json"))
     args = parser.parse_args()
@@ -65,7 +67,8 @@ def main() -> None:
     if args.export:
         if args.checkpoint is None:
             parser.error("--export requires --checkpoint")
-        _export(args.checkpoint, args.ir_dir, args.precisions)
+        _export(args.checkpoint, args.ir_dir, args.precisions,
+                calibration_frames=args.calibration_frames)
 
     ir_files = sorted(Path(args.ir_dir).rglob("*.xml"))
     if not ir_files:
@@ -95,20 +98,47 @@ def main() -> None:
 
 
 def _precision_of(ir_path: Path, precisions: list[str]) -> str:
+    """The precision this IR file actually *is*, not the one that was asked for.
+
+    An INT8 export falls back to fp16 when quantization cannot run, so trusting the directory
+    name would label an fp16 graph "int8" and report a speed-up that never happened. The export
+    report records what each component ended up as, so read that first and fall back to the
+    directory name only when there is no report.
+    """
+    report_path = ir_path.parent / "export_report.json"
+    if report_path.exists():
+        try:
+            report = json.loads(report_path.read_text())
+            for entry in report.get("converted", []) + report.get("components", []):
+                if entry.get("name") == ir_path.stem and entry.get("precision"):
+                    return entry["precision"]
+        except (OSError, ValueError):
+            pass
     for precision in precisions:
         if precision in ir_path.stem or precision in ir_path.parent.name:
             return precision
     return precisions[0] if precisions else "fp16"
 
 
-def _export(checkpoint: Path, ir_dir: Path, precisions: list[str]) -> None:
-    from armanual.policy.openvino_export import export_policy
+def _export(checkpoint: Path, ir_dir: Path, precisions: list[str],
+            calibration_frames: int = 48) -> None:
+    from armanual.policy.openvino_export import export_policy, simulator_calibration_set
     from armanual.policy.runtime import LeRobotBackend
 
     backend = LeRobotBackend(checkpoint, device="cpu")
     for precision in precisions:
         out_dir = ir_dir / precision
-        report = export_policy(backend.policy, out_dir, precision=precision)
+        calibration = None
+        if precision == "int8":
+            # Without calibration data NNCF cannot fit activation ranges, and the exporter falls
+            # back to fp16 — correctly, but the result is then an fp16 graph wearing an "int8"
+            # label, which is worse than no INT8 number at all. Render the calibration set from
+            # the robot's own cameras so the ranges describe the distribution it runs on.
+            print(f"rendering {calibration_frames} calibration frames for INT8 ...", flush=True)
+            images = simulator_calibration_set(count=calibration_frames)
+            calibration = {"vision_tower": images}
+        report = export_policy(backend.policy, out_dir, precision=precision,
+                               calibration=calibration)
         report.save(out_dir / "export_report.json")
         print(f"\n=== export ({precision}) ===")
         print(json.dumps(report.to_dict()["converted"], indent=2))
