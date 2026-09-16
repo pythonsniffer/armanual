@@ -39,6 +39,13 @@ class SuccessCriterion:
     #: that happens to start with a plate near the middle would score a pass for doing nothing.
     require_moved: bool = True
     moved_threshold: float = 0.015
+    #: For "object_moved": which object of ``category`` is the *right* one to have moved. Without
+    #: one of these the criterion passes when any object of the category moved, which on a
+    #: disambiguation task credits the robot for picking up the wrong cup — the exact failure the
+    #: tier exists to catch. Both are resolved against the scene's starting state, so they hold
+    #: for every seed rather than pinning a particular object name.
+    object_color: str = ""        # e.g. "blue" — the moved object must be this colour
+    object_ordinal: str = ""      # "leftmost" | "rightmost" among the category, by start position
     description: str = ""
 
     def describe(self) -> str:
@@ -116,6 +123,7 @@ TASKS: tuple[TaskDefinition, ...] = (
         randomization=_placement_only(),
         criteria=(
             SuccessCriterion(kind="object_moved", category="cup", tolerance=0.04,
+                             object_color="blue",
                              description="the *blue* cup moved, not the navy one"),
         ),
         paraphrases=("move the blue mug onto the plate", "place the blue cup on the dish"),
@@ -130,6 +138,7 @@ TASKS: tuple[TaskDefinition, ...] = (
         randomization=_placement_only(),
         criteria=(
             SuccessCriterion(kind="object_moved", category="cup", tolerance=0.04,
+                             object_ordinal="leftmost",
                              description="the leftmost cup was the one picked"),
         ),
         max_steps=4,

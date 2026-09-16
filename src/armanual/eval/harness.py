@@ -79,6 +79,28 @@ def _category_of(world, name: str) -> str:
     return "utensil" if obj.is_utensil else obj.category
 
 
+def _expected_referent(world, criterion: SuccessCriterion, candidates: list[str],
+                      start_positions: dict[str, np.ndarray]) -> str | None:
+    """Which object the instruction actually refers to, or ``None`` if the criterion does not say.
+
+    Resolved from the scene's *starting* state so it is independent of what the robot then did,
+    and expressed as a property ("the blue one", "the leftmost one") rather than an object name so
+    that it stays correct under randomization.
+    """
+    if criterion.object_color:
+        for name in candidates:
+            if world.scene.object_by_name(name).color_name == criterion.object_color:
+                return name
+        return None
+    if criterion.object_ordinal in ("leftmost", "rightmost"):
+        if not candidates:
+            return None
+        # "Left" is -x throughout this project; see armanual.task.grounding.
+        pick = min if criterion.object_ordinal == "leftmost" else max
+        return pick(candidates, key=lambda n: float(start_positions[n][0]))
+    return None
+
+
 def check_criterion(world, criterion: SuccessCriterion, task: TaskDefinition,
                     start_positions: dict[str, np.ndarray]) -> CriterionResult:
     """Evaluate one success criterion against the table's final state."""
@@ -95,13 +117,21 @@ def check_criterion(world, criterion: SuccessCriterion, task: TaskDefinition,
 
     positions = _object_positions(world)
     if criterion.kind == "object_moved":
+        candidates = [n for n in positions if _category_of(world, n) == criterion.category]
         moved = [
             name
-            for name, position in positions.items()
-            if _category_of(world, name) == criterion.category
-            and float(np.linalg.norm(position[:2] - start_positions[name][:2])) > criterion.tolerance
+            for name in candidates
+            if float(np.linalg.norm(positions[name][:2] - start_positions[name][:2]))
+            > criterion.tolerance
         ]
-        return CriterionResult(label, bool(moved), f"moved: {moved}")
+        expected = _expected_referent(world, criterion, candidates, start_positions)
+        if expected is None:
+            return CriterionResult(label, bool(moved), f"moved: {moved}")
+        passed = expected in moved
+        detail = f"moved: {moved}; the instruction refers to {expected}"
+        if moved and not passed:
+            detail += " — the robot moved the wrong one"
+        return CriterionResult(label, passed, detail)
 
     if criterion.kind == "object_at_slot":
         setting = build_setting(task.style, (0.0, -0.11))
