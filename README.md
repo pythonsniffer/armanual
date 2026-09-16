@@ -95,7 +95,7 @@ policy — conditioned on the subgoal sentence — executes each of them:
 - **Data**: recorded by running the analytical stack on generated instructions, successful
   episodes only — published as
   [`pythonsniffer/armanual-dinner-table`](https://huggingface.co/datasets/pythonsniffer/armanual-dinner-table)
-  (114 episodes, 22k frames, 30 distinct instructions)
+  (307 episodes, 58k frames, 32 distinct instructions)
 
 Training runs on CUDA; **inference** is what must run on Intel, which is what the challenge asks
 for. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).

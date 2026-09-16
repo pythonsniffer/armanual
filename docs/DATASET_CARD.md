@@ -26,9 +26,9 @@ Code: https://github.com/pythonsniffer/armanual
 
 | | |
 | --- | --- |
-| Episodes | 114 |
-| Frames | 22,206 (20 Hz) |
-| Distinct instructions | 30 |
+| Episodes | 307 |
+| Frames | 57,844 (20 Hz) |
+| Distinct instructions | 32 |
 | Robot | dual SO-101 (`so101_bimanual`) |
 | Format | LeRobotDataset v3.0, video-encoded |
 
@@ -87,6 +87,14 @@ randomization, which is where generalization should be measured.
 git clone https://github.com/pythonsniffer/armanual && cd armanual
 pip install -e ".[dev]" && pip install "lerobot[smolvla]"
 python scripts/collect_dataset.py --episodes-per-skill 60 --workers 6
+
+# a second, targeted pass for a skill that came out thin, merged in afterwards
+python scripts/collect_dataset.py --episodes-per-skill 110 --workers 6 \
+    --skills place_object --easy --root data/armanual-extra-a \
+    --repo-id pythonsniffer/armanual-dinner-table-extra-a
+python scripts/merge_datasets.py --source data/armanual-extra-a \
+    --target data/armanual-dinner-table \
+    --source-repo-id pythonsniffer/armanual-dinner-table-extra-a
 ```
 
 ## Licence

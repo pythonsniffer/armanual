@@ -71,8 +71,9 @@ python scripts/collect_dataset.py --episodes-per-skill 60 --workers 6
 | Cameras | 3 × 224×224 (overhead, left wrist, right wrist) |
 | State / action | 12-dim each (5 joints + gripper, per arm) |
 | Label | the instruction sentence that produced the episode |
-| Expert success rate | ~55% — only successful episodes are kept |
-| Collection rate | ~5 episodes/min with 6 workers |
+| Episodes / frames | 307 / 57,844 |
+| Expert success rate | ~58% — only successful episodes are kept (193 kept from 330 attempts on the placement pass) |
+| Collection rate | 5.5 episodes/min with 6 workers |
 
 Randomization during collection: placement, object size, mass. Lighting, friction, colour and
 clutter are held fixed because they drop the expert's success rate to ~25%, which would shrink the
@@ -210,7 +211,7 @@ number can be traced back to the episode that produced it.
 | Scene, perception, IK, parser all work | `python -m armanual.cli verify` — 8/8 | this repo |
 | Determinism, grasp geometry, reach limits | `pytest tests/ -q` — 34 tests | `tests/` |
 | Perception accuracy | 10 randomized seeds against ground truth | §1 |
-| Demonstration collection | 206 episodes attempted, 114 kept, published to the Hub | §4 |
+| Demonstration collection | 536 episodes attempted, 307 kept, published to the Hub | §4 |
 | SmolVLA fine-tune runs | 20k steps launched; loss 0.99 → 0.11 in 500 steps | §5 |
 | OpenVINO conversion | vision tower + connector convert; action expert does not | §7 |
 | INT8 quantization | 1.97× smaller, 1.71× faster, simulator-calibrated | §7 |
