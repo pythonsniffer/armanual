@@ -16,6 +16,36 @@ or hides a failure.
    the ones that fail, with the failure reason from the results file.
 4. **No speed-ups without a label.** If a clip is accelerated, the overlay says so.
 
+## What the recorded sweep actually shows
+
+Ten seeds recorded with the final policy driving, full randomization, one instruction:
+`"set the table and pour water into the blue cup"`.
+
+```bash
+CKPT=outputs/train/armanual_smolvla_v3/checkpoints/030000/pretrained_model
+for s in 0 1 2 3 4 5 6 7 8 9; do
+  python scripts/run_task.py --instruction "set the table and pour water into the blue cup" \
+      --seed $s --randomize --policy $CKPT \
+      --record outputs/videos/seed_$s.mp4 --json outputs/videos/seed_$s.json
+done
+```
+
+| Subgoal | Succeeded |
+| --- | --- |
+| open the drawer | **4 / 10** |
+| put the plate in the middle of the table | 0 / 10 |
+| put the fork to the left of the plate | 0 / 10 |
+| put the cup to the right of the plate | 0 / 10 |
+| pour water into the blue cup | 0 / 10 |
+| **all subgoals** | **4 / 50** |
+
+Ten videos, ~54 s each. Rule 3 above applies: every seed is in the sweep, including the six where
+the policy does not open the drawer either. The drawer successes are the honest highlight — a
+contact-rich manipulation performed from pixels and a sentence, with no scripted fallback anywhere
+in the loop — and the rest of the sweep is what a 617-episode dataset buys on a task that needs
+millimetre placement. The matching per-seed JSON next to each video carries the subgoal record and
+the inference latency that produced it.
+
 ## Shot list
 
 | # | Shot | What it proves | Command |
