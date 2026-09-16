@@ -109,14 +109,27 @@ python scripts/train_policy.py --policy smolvla --steps 30000 --image-size 256
 | --- | --- |
 | Model | SmolVLA (`lerobot/smolvla_base`), 450 M parameters |
 | Trainable | action expert only; SigLIP vision tower frozen |
-| Batch | 2 × 16 gradient accumulation = effective 32 |
+| Batch | 16 (no gradient accumulation — see below) |
+| Steps | 30,000 = 4.2 epochs over 617 episodes; final loss **0.019** |
 | Images | 256×256 (dataset is 224×224; padding to the pretrained 512 adds no information and costs ~4× the vision compute) |
-| Measured step time | 0.22 s/step at batch 2; **0.46 s/step at batch 16** (2.17 steps/s) → 20k steps ≈ 2h26m |
-| Bottleneck | GPU compute at batch 16 (`updt_s` 0.44, `data_s` 0.007). At batch 2 it was the dataloader instead, which is why the larger batch is nearly free |
+| Measured step time | **0.35 s/step** (2.9 steps/s) at the start, drifting to **0.54 s/step** (1.8 steps/s) after ~2.5 h as the laptop GPU throttles. 30k steps took 4h22m |
+| Bottleneck | GPU compute throughout (`updt_s` 0.54, `data_s` 0.007) — the dataloader is never the limit at this batch size |
 
-Two integration details that are easy to miss and cost an hour each: SmolVLA's pretrained config
-names its cameras `camera1..3`, so a `--rename_map` is required; and torchcodec needs real FFmpeg
-shared libraries, which this repo installs into `.venv/ffmpeg` via conda.
+Three integration details that are easy to miss and cost an hour each:
+
+* SmolVLA's pretrained config names its cameras `camera1..3`, so a `--rename_map` is required —
+  and the *same* rename has to reach inference, which it does by going through the processor
+  pipeline saved with the checkpoint rather than a hand-built batch.
+* torchcodec needs real FFmpeg shared libraries, which this repo installs into `.venv/ffmpeg` via
+  conda; PyAV's bundled copies have mangled sonames and do not satisfy it.
+* **`--image-size` must be a multiple of 64.** The dataset's native 224 is not, and SmolVLM2's
+  connector fails deep inside with `RuntimeError: shape '[16, 14, 3, 3072]' is invalid for input
+  of size 2408448` — which reads like a batching problem and is really an image-size one. The flag
+  is restricted to valid sizes so the mistake cannot be repeated.
+
+Gradient accumulation is unavailable here: with `--policy.path` supplying the optimizer, LeRobot
+rejects `--optimizer.grad_accumulation_steps`, so the effective batch is raised by raising the
+batch size instead.
 
 ## 6. Policy versus analytical controller
 
