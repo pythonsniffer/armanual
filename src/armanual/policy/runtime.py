@@ -350,5 +350,13 @@ class OpenVINOBackend:
         self.stats.record((time.perf_counter() - started) * 1000)
         return action
 
+    def predict_chunk(self, images: dict[str, np.ndarray], state: np.ndarray,
+                      task: str) -> np.ndarray:
+        """Same chunked path as the PyTorch backend, so the two are timed on equal terms."""
+        started = time.perf_counter()
+        chunk = self.base.predict_chunk(images, state, task)
+        self.stats.record((time.perf_counter() - started) * 1000)
+        return chunk
+
     def describe(self) -> dict:
         return {"device": self.device, "placement": dict(self.placement)}
