@@ -40,11 +40,18 @@ throughput, model size, and device failures with their reasons. Every report sta
 ## 4. Demonstration video across 10 randomized seeds
 
 ```bash
+CKPT=outputs/train/armanual_smolvla_v3/checkpoints/030000/pretrained_model
 for s in 0 1 2 3 4 5 6 7 8 9; do
-  python scripts/run_task.py --instruction "set the table" --seed $s --randomize \
+  python scripts/run_task.py --instruction "set the table and pour water into the blue cup" \
+      --seed $s --randomize --policy $CKPT \
       --record outputs/videos/seed_$s.mp4 --json outputs/videos/seed_$s.json
 done
 ```
+
+Recorded with the policy driving, so what the video shows is the deployed system rather than the
+demonstration generator. The episodes are the same randomized seeds the benchmark uses, and most
+subgoals fail — see [RESULTS.md](RESULTS.md) §6 for the numbers that go with them. Drop `--policy`
+to record the analytical baseline over the same seeds for comparison.
 
 Each frame carries the instruction, current subgoal, controller, device and latency. Shot list and
 the rubric mapping: [DEMO.md](DEMO.md).
