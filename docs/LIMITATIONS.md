@@ -64,9 +64,24 @@ is unlikely to exceed it on skills where the expert is weak. It is trained on su
 only. The expert appears nowhere in a policy run — it is the data source and the baseline, not a
 safety net.
 
-**Collection randomization is narrower than evaluation randomization.** Deliberate: the expert's
-success rate falls from ~75% to ~25% with lighting, friction and clutter enabled, which would
-shrink the dataset threefold. The consequence is a visual-domain gap that tier-5 numbers expose.
+**The policy does not generalize to unseen scene instances, and this is the binding limitation.**
+Measured on identical tasks, instructions and success criteria, differing only in seed: 2/4 on
+scenes present in the training set, 0/8 on held-out scenes. Wiring, action layout, policy activity
+and the scene-generator configuration were each checked and excluded as causes (see
+[RESULTS.md](RESULTS.md) §6). Doubling the dataset from 307 to 617 episodes and widening
+randomization to object size and mass was the response; how far it closes the gap is reported with
+the final numbers rather than assumed.
+
+**How the near-misses fail is specific.** On plate placement the policy moves the object but
+lands it 65–76 mm from the slot against a 60 mm tolerance — 5–16 mm short. On cup placement it
+frequently does not move the object at all (0–7 mm of travel), and the scoring refuses to credit
+an object that happened to spawn near its target. These are different problems and only the first
+looks like it is close to solved.
+
+**Collection randomization is narrower than evaluation randomization.** The expert's success rate
+falls from 77% (placement-only variation) to ~50% once object size and mass vary, and to ~25% with
+lighting, friction and clutter enabled. The first widening was accepted for the diversity it buys;
+the rest is not, so a visual-domain gap remains that tier-5 numbers expose.
 
 ## Intel deployment
 
@@ -88,6 +103,15 @@ Training runs on CUDA, which the challenge explicitly permits.
 **No GPU OpenGL under WSL.** MuJoCo renders on the CPU (llvmpipe) at ~100 ms per 224×224 frame
 with shadows off, ~285 ms with them on. This is why dataset collection is parallelized across
 processes and why evaluation wall-clock is dominated by rendering rather than physics.
+
+**Worker processes grow, and both pools now bound it.** The rasterizer's framebuffers fragment
+glibc's arenas, so a long-lived worker's RSS climbs about 0.1 GB per five minutes even though
+nothing leaks in the Python sense — far enough to reach the kernel's OOM killer part way through
+a collection pass or an evaluation. Collection and evaluation workers are therefore retired after
+a fixed number of episodes and call `malloc_trim` between them; measured effect is a worker
+footprint that plateaus at ~1.9 GB instead of climbing. The evaluation pool additionally collects
+each episode with a timeout and re-runs anything a dead worker never returned, because the default
+behaviour is to wait for it forever.
 
 ## Carried-over gaps
 
