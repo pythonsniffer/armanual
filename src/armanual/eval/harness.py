@@ -24,7 +24,7 @@ from pathlib import Path
 
 import numpy as np
 
-from armanual.eval.tiers import TASKS, SuccessCriterion, TaskDefinition
+from armanual.eval.tiers import TASKS, SuccessCriterion, TaskDefinition, task_by_id
 from armanual.perception.observer import CameraObserver, PrivilegedObserver
 from armanual.planning.executor import ClosedLoopExecutor, EpisodeRecord
 from armanual.planning.place_setting import ROLE_CATEGORIES, build_setting
@@ -309,10 +309,19 @@ def run_suite(tasks: list[TaskDefinition], seeds: list[int], *, privileged: bool
                     f"{result.wall_seconds:5.1f}s  {','.join(result.failure_kinds)}"
                 )
 
+    return _finish_suite(results, seeds, tasks, privileged=privileged, out_dir=out_dir,
+                         progress=progress, controller=getattr(backend, "name", "scripted"))
+
+
+def _finish_suite(results: list[EpisodeResult], seeds: list[int], tasks: list[TaskDefinition],
+                  *, privileged: bool, out_dir: Path | None, controller: str,
+                  progress=_flushing_print) -> dict:
+    """Summarize, write and return the results payload. Shared by the serial and parallel runners
+    so a parallel run produces a byte-identical file to a serial one."""
     payload = {
         "environment": environment_info(),
         "observer": "privileged" if privileged else "camera",
-        "controller": getattr(backend, "name", "scripted"),
+        "controller": controller,
         "seeds": seeds,
         "tasks": [t.id for t in tasks],
         "summary": summarize(results),
@@ -352,3 +361,95 @@ def _write_csv(path: Path, results: list[EpisodeResult]) -> None:
 
 def all_tasks() -> list[TaskDefinition]:
     return list(TASKS)
+
+
+# --------------------------------------------------------------------------------------------
+# Parallel execution
+#
+# The suite is 11 tasks x 10 seeds, and an episode costs minutes of wall-clock because MuJoCo
+# renders on the CPU under WSL. Run serially that is most of a day per configuration, which makes
+# the 10-seed number too expensive to re-measure after a change — and a benchmark nobody re-runs
+# stops being a benchmark. Episodes are independent by construction (a run is a pure function of
+# (task, seed)), so they shard across processes without affecting any result.
+#
+# Workers are spawned, not forked: MuJoCo's renderer and CUDA both hold state that does not
+# survive a fork. Each worker therefore builds its own backend once, in its initializer, rather
+# than once per episode.
+# --------------------------------------------------------------------------------------------
+
+#: Per-process state, populated by :func:`_init_worker`.
+_WORKER: dict = {}
+
+
+@dataclass(frozen=True)
+class BackendSpec:
+    """A picklable description of a policy backend, so workers can each build their own."""
+
+    checkpoint: Path
+    device: str = "cuda"
+    ov_device: str | None = None
+    ir_dir: Path | None = None
+
+    def build(self):
+        if self.ov_device:
+            from armanual.policy.runtime import OpenVINOBackend
+
+            return OpenVINOBackend(self.checkpoint, self.ir_dir, device=self.ov_device)
+        from armanual.policy.runtime import LeRobotBackend
+
+        return LeRobotBackend(self.checkpoint, device=self.device)
+
+
+def _init_worker(spec: BackendSpec | None) -> None:
+    _WORKER["backend"] = spec.build() if spec is not None else None
+
+
+def _run_one(job: tuple[str, int, bool, bool]) -> dict:
+    task_id, seed, privileged, fallback = job
+    result = run_episode(task_by_id(task_id), seed, privileged=privileged,
+                         backend=_WORKER.get("backend"), fallback=fallback)
+    return result.to_dict()
+
+
+def _result_from_dict(data: dict) -> EpisodeResult:
+    """Rebuild an :class:`EpisodeResult` from a worker's payload."""
+    fields = {k: v for k, v in data.items() if k != "criterion_score"}
+    fields["criteria"] = [CriterionResult(**c) for c in data.get("criteria", [])]
+    return EpisodeResult(**fields)
+
+
+def run_suite_parallel(tasks: list[TaskDefinition], seeds: list[int], *, workers: int,
+                       privileged: bool = False, out_dir: Path | None = None,
+                       progress=_flushing_print, backend_spec: BackendSpec | None = None,
+                       fallback: bool = False) -> dict:
+    """Same contract as :func:`run_suite`, with episodes sharded across processes.
+
+    Results are collected as they finish, then sorted back into task/seed order so the written
+    file is identical to the serial one.
+    """
+    import multiprocessing as mp
+
+    jobs = [(task.id, seed, privileged, fallback) for task in tasks for seed in seeds]
+    order = {(task.id, seed): i for i, (task, seed) in enumerate(
+        (t, s) for t in tasks for s in seeds)}
+
+    context = mp.get_context("spawn")
+    collected: list[EpisodeResult] = []
+    with context.Pool(workers, initializer=_init_worker, initargs=(backend_spec,)) as pool:
+        for index, payload in enumerate(pool.imap_unordered(_run_one, jobs), start=1):
+            result = _result_from_dict(payload)
+            collected.append(result)
+            if progress:
+                marks = "".join("+" if c.passed else "-" for c in result.criteria)
+                progress(
+                    f"[{index:3d}/{len(jobs)}] {result.task_id:28s} seed {result.seed:2d}  "
+                    f"{'PASS' if result.success else 'fail'}  [{marks}]  "
+                    f"sub={result.episode.get('subtask_success_rate', 0):.2f}  "
+                    f"{result.wall_seconds:5.1f}s  {','.join(result.failure_kinds)}"
+                )
+
+    collected.sort(key=lambda r: order[(r.task_id, r.seed)])
+    controller = "scripted" if backend_spec is None else (
+        f"openvino:{backend_spec.ov_device}" if backend_spec.ov_device else "torch:cuda")
+    return _finish_suite(collected, seeds, tasks, privileged=privileged, out_dir=out_dir,
+                         progress=progress, controller=controller)
