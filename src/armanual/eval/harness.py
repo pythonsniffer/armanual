@@ -380,6 +380,14 @@ def all_tasks() -> list[TaskDefinition]:
 #: Per-process state, populated by :func:`_init_worker`.
 _WORKER: dict = {}
 
+#: Longest an episode may take before the parent stops waiting for it. Generous by design: it is
+#: a guard against a worker that died, not a limit on a slow episode.
+EPISODE_TIMEOUT = 900.0
+
+#: Episodes a worker runs before it is retired and replaced. Bounds the renderer memory a
+#: long-lived worker accumulates; see :func:`run_suite_parallel`.
+MAX_TASKS_PER_CHILD = 6
+
 
 @dataclass(frozen=True)
 class BackendSpec:
@@ -421,11 +429,24 @@ def _result_from_dict(data: dict) -> EpisodeResult:
 def run_suite_parallel(tasks: list[TaskDefinition], seeds: list[int], *, workers: int,
                        privileged: bool = False, out_dir: Path | None = None,
                        progress=_flushing_print, backend_spec: BackendSpec | None = None,
-                       fallback: bool = False) -> dict:
+                       fallback: bool = False, episode_timeout: float = EPISODE_TIMEOUT,
+                       max_tasks_per_child: int = MAX_TASKS_PER_CHILD) -> dict:
     """Same contract as :func:`run_suite`, with episodes sharded across processes.
 
+    Two failure modes of a naive worker pool are handled here, because both were observed on this
+    machine and both silently corrupt a benchmark run:
+
+    * **Workers grow.** MuJoCo allocates a renderer per episode and a long-lived worker does not
+      give all of it back; one worker reached 5.7 GB after a few dozen episodes and was killed by
+      the kernel's OOM killer. ``maxtasksperchild`` retires a worker before it gets there, at the
+      cost of re-loading the policy occasionally.
+    * **A dead worker hangs the pool.** ``imap_unordered`` waits forever for a result that is
+      never coming, so a suite that lost one episode looks identical to one still running. Each
+      episode is therefore collected with a timeout, and anything that does not come back is
+      re-run in this process rather than quietly dropped.
+
     Results are collected as they finish, then sorted back into task/seed order so the written
-    file is identical to the serial one.
+    file is identical to a serial run's.
     """
     import multiprocessing as mp
 
@@ -433,20 +454,44 @@ def run_suite_parallel(tasks: list[TaskDefinition], seeds: list[int], *, workers
     order = {(task.id, seed): i for i, (task, seed) in enumerate(
         (t, s) for t in tasks for s in seeds)}
 
+    def report(index: int, result: EpisodeResult, note: str = "") -> None:
+        if not progress:
+            return
+        marks = "".join("+" if c.passed else "-" for c in result.criteria)
+        progress(
+            f"[{index:3d}/{len(jobs)}] {result.task_id:28s} seed {result.seed:2d}  "
+            f"{'PASS' if result.success else 'fail'}  [{marks}]  "
+            f"sub={result.episode.get('subtask_success_rate', 0):.2f}  "
+            f"{result.wall_seconds:5.1f}s  {','.join(result.failure_kinds)}{note}"
+        )
+
     context = mp.get_context("spawn")
     collected: list[EpisodeResult] = []
-    with context.Pool(workers, initializer=_init_worker, initargs=(backend_spec,)) as pool:
-        for index, payload in enumerate(pool.imap_unordered(_run_one, jobs), start=1):
-            result = _result_from_dict(payload)
+    lost: list[tuple] = []
+    with context.Pool(workers, initializer=_init_worker, initargs=(backend_spec,),
+                      maxtasksperchild=max_tasks_per_child) as pool:
+        submitted = [(job, pool.apply_async(_run_one, (job,))) for job in jobs]
+        for index, (job, handle) in enumerate(submitted, start=1):
+            try:
+                collected.append(_result_from_dict(handle.get(timeout=episode_timeout)))
+            except Exception as exc:  # worker died, or the episode itself raised
+                lost.append(job)
+                if progress:
+                    progress(f"[{index:3d}/{len(jobs)}] {job[0]:28s} seed {job[1]:2d}  "
+                             f"LOST ({type(exc).__name__}) — will retry in-process")
+                continue
+            report(index, collected[-1])
+        pool.terminate()
+
+    if lost:
+        if progress:
+            progress(f"\nre-running {len(lost)} episode(s) that no worker returned")
+        _init_worker(backend_spec)
+        for index, job in enumerate(lost, start=1):
+            result = run_episode(task_by_id(job[0]), job[1], privileged=job[2],
+                                 backend=_WORKER.get("backend"), fallback=job[3])
             collected.append(result)
-            if progress:
-                marks = "".join("+" if c.passed else "-" for c in result.criteria)
-                progress(
-                    f"[{index:3d}/{len(jobs)}] {result.task_id:28s} seed {result.seed:2d}  "
-                    f"{'PASS' if result.success else 'fail'}  [{marks}]  "
-                    f"sub={result.episode.get('subtask_success_rate', 0):.2f}  "
-                    f"{result.wall_seconds:5.1f}s  {','.join(result.failure_kinds)}"
-                )
+            report(index, result, note="  (retry)")
 
     collected.sort(key=lambda r: order[(r.task_id, r.seed)])
     controller = "scripted" if backend_spec is None else (
