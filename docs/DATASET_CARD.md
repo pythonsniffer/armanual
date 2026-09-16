@@ -26,9 +26,9 @@ Code: https://github.com/pythonsniffer/armanual
 
 | | |
 | --- | --- |
-| Episodes | 307 |
-| Frames | 57,844 (20 Hz) |
-| Distinct instructions | 32 |
+| Episodes | 617 |
+| Frames | 114,226 (20 Hz) |
+| Distinct instructions | 33 |
 | Robot | dual SO-101 (`so101_bimanual`) |
 | Format | LeRobotDataset v3.0, video-encoded |
 
