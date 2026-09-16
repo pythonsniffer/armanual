@@ -130,20 +130,43 @@ a failed subgoal. Two columns are reported on the same tasks and seeds — the a
 (what the demonstration generator achieves) and the policy — so the gap between them is visible
 rather than papered over.
 
-### Policy-only progress during training
+### Policy-only progress, and what actually limits it
 
 ```bash
-python scripts/eval_policy_progress.py --checkpoint <ckpt> --seeds 2 --seconds 12
+python scripts/evaluate.py --tier 1 --seeds 4 --workers 1 --policy <ckpt>
 ```
 
-| Checkpoint | Loss | Policy-only subgoal success | Drawer | Plate | Cup |
-| --- | --- | --- | --- | --- | --- |
-| 4,000 steps | 0.040 | **0.17** (1/6) | 0.50 | 0.00 | 0.00 |
+Training on 307 demonstrations (of which ~280 are placement) reaches a training loss of 0.021 by
+12k steps and stops improving. Task success does not follow the loss, so the interesting
+measurement is not the loss curve but **where the policy is asked to act**:
 
-The drawer result is the interesting one: opening a drawer is a multi-second, contact-rich
-manipulation, and the policy performs it unaided from roughly a dozen demonstrations. Placement
-lags, which is consistent with the same 87 demonstrations being spread across many
-object × destination combinations.
+| Scenes | Seeds | Episodes | Task success |
+| --- | --- | --- | --- |
+| **Held out** (never collected) | 0–3 | 8 | **0/8** |
+| **Trained on** (in the dataset) | 8001, 8005, 8021, 8023 | 4 | **2/4** |
+
+Both columns use the identical scene generator, the identical instruction and the identical
+success criterion — only the seed differs. If the true success rate were the 50% seen on trained
+scenes, drawing 0/8 on held-out scenes has probability ~0.4%, so the gap is real and not sampling
+noise.
+
+That single comparison rules out most of the things that usually explain a policy that "does
+something plausible but never succeeds", and each was checked directly:
+
+* **Not a wiring bug.** The camera rename map (`top→camera1`, `left_wrist→camera2`,
+  `right_wrist→camera3`) is saved inside the checkpoint's processor pipeline and applied at
+  inference, and the action layout is symmetric between collection and the runner
+  (`actuator_ids[:5] == arm_actuators`, `actuator_ids[5] == gripper_actuator`).
+* **Not a dead policy.** Over a 20 s episode the left arm's joints travel 3–8 rad with a
+  commanded-action standard deviation of 0.19–0.25, while the right arm holds station
+  (std 0.007–0.012) — which is the correct division of labour for a one-armed placement.
+* **Not a distribution mismatch in the scene generator.** Tier 1 and the collection pass both use
+  `RandomizationConfig.placement_only()`.
+
+What is left is **generalization**: the policy has learned the skill on the scenes it saw and does
+not transfer to new object placements. The lever for that is demonstration diversity, not more
+gradient steps — which is why the second collection pass widens randomization to object size and
+mass rather than simply training longer.
 
 ### Cost of one episode, and where it goes
 
