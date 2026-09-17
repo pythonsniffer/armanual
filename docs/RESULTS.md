@@ -161,6 +161,36 @@ and it is reported as measured. What the policy does do, it does unaided: three 
 are cup placements and colour-grounded selections in tiers 1–2, executed end to end from pixels
 and a sentence.
 
+### The policy is stochastic, so one run per seed is not a measurement
+
+```bash
+python scripts/policy_variance.py --policy <ckpt> --tier 1 --seeds 10 --repeats 3
+```
+
+The analytical controller is deterministic: a `(task, seed)` pair replays exactly, so running it
+once is a measurement. SmolVLA is a flow-matching policy that samples noise for every action
+chunk, so the same scene can succeed on one run and fail on the next — and the benchmark runs each
+pair once.
+
+Tier 1, the same twenty episodes, three independent runs:
+
+| Run | Success |
+| --- | --- |
+| 1 | 0.100 |
+| 2 | 0.200 |
+| 3 | 0.100 |
+| **mean** | **0.133** |
+
+The single-run benchmark reported **0.05** for this tier. It drew a low sample; the mean over three
+runs is roughly 2.7x higher. That does not rescue the policy — 0.133 against the baseline's 0.75 is
+still a wide gap — but it does mean a single-draw policy number should not be quoted as if it were
+the deterministic kind.
+
+Of the four tier-1 episodes the policy ever passes, **one passes in every run and three pass in
+some runs and not others**. "Cannot do it" and "does it about half the time" are different states,
+and a one-shot benchmark cannot tell them apart. The headline policy figures below are therefore
+reported as a mean over three complete passes of the suite, with the spread shown.
+
 ### What the policy can actually do, at subgoal level
 
 Task success is an `all` over three to five subgoals, so a policy that does most of a task still
