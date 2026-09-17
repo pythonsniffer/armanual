@@ -135,31 +135,41 @@ batch size instead.
 
 ```bash
 python scripts/evaluate.py --seeds 10 --workers 4 --out outputs/eval_baseline
-python scripts/evaluate.py --seeds 10 --workers 3 --policy <ckpt> --out outputs/eval_policy_final
+for r in 1 2 3; do
+  python scripts/evaluate.py --seeds 10 --workers 3 --policy <ckpt> --out outputs/eval_policy_run$r
+done
 ```
 
 The deployed system is **pure VLA**: every joint command comes from SmolVLA and nothing rescues a
 failed subgoal. Both columns are the same 11 tasks × 10 seeds, the same scenes and the same
-scoring, so the gap is visible rather than papered over.
+scoring.
 
-| Tier | Episodes | Analytical baseline | **Pure VLA** |
-| --- | --- | --- | --- |
-| 1 — placement | 20 | 0.75 | 0.05 |
-| 2 — disambiguation | 20 | 0.70 | 0.10 |
-| 3 — drawer dependency | 10 | 0.00 | 0.00 |
-| 4 — pour + hand-off | 20 | 0.35 | 0.00 |
-| 5 — full randomization | 20 | 0.20 | 0.00 |
-| 6 — hero / style | 20 | 0.30 | 0.00 |
-| **all** | **110** | **0.418** | **0.027** |
+The baseline is deterministic and is run once. The policy is not (see the section above), so it is
+run **three complete times** and reported as a mean with the observed range — 330 policy episodes
+in total.
 
-Criterion score: 0.534 baseline vs 0.045 policy.
-Every policy failure is attributed to `policy` — by construction, since there is no fallback to
-attribute anything else to.
+| Tier | Episodes | Analytical baseline | **Pure VLA (mean of 3)** | range |
+| --- | --- | --- | --- | --- |
+| 1 — placement | 20 | 0.75 | **0.083** | 0.00–0.15 |
+| 2 — disambiguation | 20 | 0.70 | **0.100** | 0.05–0.15 |
+| 3 — drawer dependency | 10 | 0.00 | **0.000** | 0.00–0.00 |
+| 4 — pour + hand-off | 20 | 0.35 | **0.050** | 0.00–0.10 |
+| 5 — full randomization | 20 | 0.20 | **0.000** | 0.00–0.00 |
+| 6 — hero / style | 20 | 0.30 | **0.000** | 0.00–0.00 |
+| **all** | **110** | **0.418** | **0.042** | 0.027–0.055 |
 
-**The policy is far behind the expert that taught it.** 0.027 against 0.418 is the honest headline
-and it is reported as measured. What the policy does do, it does unaided: three of its successes
-are cup placements and colour-grounded selections in tiers 1–2, executed end to end from pixels
-and a sentence.
+Per-run overall task success: 0.055, 0.045, 0.027 — mean **0.042**,
+standard deviation 0.014. Subgoal-level success averages **0.101**.
+
+**The policy is roughly a tenth of the expert that taught it.** 0.042 against
+0.418 is the honest headline. It is reported as a mean because a
+single pass of this suite returned anything from 0.027 to 0.055, and quoting
+whichever one happened to run last would be reporting the draw rather than the policy.
+
+Tiers 3, 5 and 6 are zero in every run: the drawer-dependency task, full randomization and the
+hero tasks are out of reach at this level of capability. Tier 4 is non-zero in one run out of
+three — a pour completed end to end — which is worth stating precisely because it is exactly the
+kind of result that a single pass would either miss entirely or overstate.
 
 ### The policy is stochastic, so one run per seed is not a measurement
 

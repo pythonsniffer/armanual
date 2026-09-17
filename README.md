@@ -19,9 +19,11 @@ python scripts/run_task.py --instruction "set the table and pour water into the 
 >
 > **Headline result, 11 tasks × 10 seeds = 110 episodes, scored from the final state of the
 > table:** the analytical baseline reaches **0.418** task success; the deployed **pure-VLA policy
-> reaches 0.027**. The policy is a long way behind the expert that taught it, and the measured
-> reason — it learns the skill on the scenes it saw and does not transfer to new ones — is in
-> [docs/RESULTS.md](docs/RESULTS.md) §6 with the evidence that rules out the alternatives.
+> reaches 0.042** (mean of three complete passes, range 0.027–0.055 — SmolVLA samples noise, so
+> one pass measures the draw as much as the policy). The policy is a long way behind the expert
+> that taught it, and the measured reason — it learns the skill on the scenes it saw and does not
+> transfer to new ones — is in [docs/RESULTS.md](docs/RESULTS.md) §6 with the evidence that rules
+> out the alternatives.
 
 ---
 
@@ -50,7 +52,7 @@ re-plans. "The blue cup" means whichever cup is blue *now*.
 | --- | --- |
 | **Perception is real** | Objects are found by segmenting an RGB-D point cloud from the simulated cameras. No simulator state is read anywhere in the control path. Measured: recall 0.92, precision 0.84, position error 8.6 mm |
 | **Control is the policy** | In a run, all twelve joint commands come from SmolVLA reading three cameras and the instruction text. The analytical stack generated the training data and is the baseline it is compared against — it does not drive the robot |
-| **The benchmark is adversarial to itself** | Reading episode records rather than summaries caught the disambiguation tier crediting the robot for moving the *wrong* cup. Fixing it cost the policy 0.073 → 0.027 and the baseline 0.436 → 0.418; both numbers here are the corrected ones |
+| **The benchmark is adversarial to itself** | Reading episode records rather than summaries caught the disambiguation tier crediting the robot for moving the *wrong* cup; fixing it cost both controllers. A second pass caught the policy being quoted from a single run when it is stochastic — the headline is now a mean over three full passes with the range shown |
 | **Hand-offs happen for a reason** | When the pick is in one arm's workspace and the place is in the other's, the planner inserts a hand-off — it is not scripted into the demo |
 | **Ambiguity is measured** | "The blue cup" next to a navy cup produces a recorded ambiguity with both candidates and their scores |
 | **Failures are attributed** | Every failure is tagged perception / grounding / planning / reachability / grasp / placement / coordination / timeout |
